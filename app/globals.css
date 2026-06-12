@@ -1,8 +1,8 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #0c1a0f;
+  --foreground: #f0f0f0;
 }
 
 @theme inline {
@@ -10,17 +10,56 @@
   --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
-}
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  --color-pitch-dark: #143d23;
+  --color-pitch-mid: #1a5c34;
+  --color-pitch-light: #1f6e3d;
+  --color-gold: #f5c842;
+  --color-gold-light: #fde68a;
+  --color-silver: #c0c0c0;
+  --color-bronze: #cd7f32;
+  --color-card: rgba(0, 0, 0, 0.65);
+  --color-card-border: rgba(255, 255, 255, 0.1);
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans, Arial, Helvetica, sans-serif);
+}
+
+.pitch-stripes {
+  background-image: repeating-linear-gradient(
+    180deg,
+    #1a5c34 0px,
+    #1a5c34 40px,
+    #1f6e3d 40px,
+    #1f6e3d 80px
+  );
+}
+
+.glass {
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0.04) 0%,
+    rgba(255, 255, 255, 0.1) 50%,
+    rgba(255, 255, 255, 0.04) 100%
+  );
+  background-size: 400% 100%;
+  animation: shimmer 1.6s ease-in-out infinite;
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: 100% 0;
+  }
+  100% {
+    background-position: -100% 0;
+  }
 }
