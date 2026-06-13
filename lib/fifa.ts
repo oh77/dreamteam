@@ -753,6 +753,181 @@ export function selectTeam(
 }
 
 // ---------------------------------------------------------------------------
+// Sample teams (AI-predicted XIs, scored live against the tournament)
+// ---------------------------------------------------------------------------
+
+interface SamplePlayerSpec {
+  // Candidate FIFA player ids. More than one = pick the best available (used
+  // for "Spain's goalkeeper", which could be Simón or Raya).
+  ids: string[];
+  // Display fallback, used before the player has appeared in any match.
+  name: string;
+  countryCode: string;
+}
+
+export interface SampleTeam {
+  id: string;
+  name: string;
+  subtitle: string;
+  accent: "gpt" | "claude";
+  team: SelectedTeam;
+}
+
+const EMPTY_BREAKDOWN: PlayerTournamentStats["breakdown"] = {
+  matchResults: 0,
+  goals: 0,
+  cleanSheets: 0,
+  goalsConceded: 0,
+  ownGoals: 0,
+  yellowCards: 0,
+  redCards: 0,
+};
+
+const SAMPLE_TEAMS: Array<{
+  id: string;
+  name: string;
+  subtitle: string;
+  accent: "gpt" | "claude";
+  captainId: string;
+  goalkeeper: SamplePlayerSpec;
+  defenders: SamplePlayerSpec[];
+  midfielders: SamplePlayerSpec[];
+  attackers: SamplePlayerSpec[];
+}> = [
+  {
+    id: "gpt",
+    name: "GPT United",
+    subtitle: "ChatGPT's pre-tournament XI",
+    accent: "gpt",
+    captainId: "448202", // Jude Bellingham
+    goalkeeper: {
+      ids: ["308300"],
+      name: "Emiliano Martínez",
+      countryCode: "ARG",
+    },
+    defenders: [
+      { ids: ["400721"], name: "Achraf Hakimi", countryCode: "MAR" },
+      { ids: ["419177"], name: "William Saliba", countryCode: "FRA" },
+      { ids: ["431196"], name: "Cristian Romero", countryCode: "ARG" },
+    ],
+    midfielders: [
+      { ids: ["448202"], name: "Jude Bellingham", countryCode: "ENG" },
+      { ids: ["423646"], name: "Pedri", countryCode: "ESP" },
+      { ids: ["430669"], name: "Florian Wirtz", countryCode: "GER" },
+      { ids: ["441149"], name: "Vitinha", countryCode: "POR" },
+    ],
+    attackers: [
+      { ids: ["389867"], name: "Kylian Mbappé", countryCode: "FRA" },
+      { ids: ["402920"], name: "Lautaro Martínez", countryCode: "ARG" },
+      { ids: ["484320"], name: "Lamine Yamal", countryCode: "ESP" },
+    ],
+  },
+  {
+    id: "claude",
+    name: "FC Claude",
+    subtitle: "Claude Opus 4.8's pre-tournament XI",
+    accent: "claude",
+    captainId: "389867", // Kylian Mbappé
+    goalkeeper: {
+      ids: ["430753", "447853"], // Unai Simón / David Raya
+      name: "Unai Simón / David Raya",
+      countryCode: "ESP",
+    },
+    defenders: [
+      { ids: ["430707"], name: "Jules Koundé", countryCode: "FRA" },
+      { ids: ["433195"], name: "Nuno Mendes", countryCode: "POR" },
+      { ids: ["436612"], name: "Denzel Dumfries", countryCode: "NED" },
+    ],
+    midfielders: [
+      { ids: ["448202"], name: "Jude Bellingham", countryCode: "ENG" },
+      { ids: ["395206"], name: "Bruno Fernandes", countryCode: "POR" },
+      { ids: ["430628"], name: "Alexis Mac Allister", countryCode: "ARG" },
+      { ids: ["411726"], name: "Lucas Paquetá", countryCode: "BRA" },
+    ],
+    attackers: [
+      { ids: ["389867"], name: "Kylian Mbappé", countryCode: "FRA" },
+      { ids: ["369419"], name: "Harry Kane", countryCode: "ENG" },
+      { ids: ["484320"], name: "Lamine Yamal", countryCode: "ESP" },
+    ],
+  },
+];
+
+export function getSampleTeams(
+  allStats: PlayerTournamentStats[],
+  teamCountry: Record<string, string> = {},
+): SampleTeam[] {
+  const byId = new Map(allStats.map((s) => [s.player.id, s]));
+
+  const resolve = (
+    spec: SamplePlayerSpec,
+    position: Position,
+    isCaptain: boolean,
+  ): FormattedPlayer => {
+    // Among candidate ids, pick the one who has actually played the most.
+    let stats: PlayerTournamentStats | undefined;
+    for (const id of spec.ids) {
+      const s = byId.get(id);
+      if (s && (!stats || s.matchesPlayed > stats.matchesPlayed)) stats = s;
+    }
+
+    const base = stats?.breakdown ?? EMPTY_BREAKDOWN;
+    const basePoints = stats?.points ?? 0;
+    const mult = isCaptain ? 2 : 1;
+
+    return {
+      name: stats?.player.name ?? spec.name,
+      team: stats?.player.teamName ?? spec.countryCode,
+      countryCode: stats
+        ? (teamCountry[stats.player.teamId] ?? spec.countryCode)
+        : spec.countryCode,
+      position,
+      points: basePoints * mult,
+      matchesPlayed: stats?.matchesPlayed ?? 0,
+      breakdown: isCaptain
+        ? (Object.fromEntries(
+            Object.entries(base).map(([k, v]) => [k, (v as number) * 2]),
+          ) as PlayerTournamentStats["breakdown"])
+        : base,
+      baseBreakdown: base,
+      isCaptain,
+    };
+  };
+
+  return SAMPLE_TEAMS.map((t) => {
+    const isCap = (spec: SamplePlayerSpec) => spec.ids.includes(t.captainId);
+    const goalkeeper = resolve(t.goalkeeper, "GK", isCap(t.goalkeeper));
+    const defenders = t.defenders.map((s) => resolve(s, "DEF", isCap(s)));
+    const midfielders = t.midfielders.map((s) => resolve(s, "MID", isCap(s)));
+    const attackers = t.attackers.map((s) => resolve(s, "ATT", isCap(s)));
+    const all = [goalkeeper, ...defenders, ...midfielders, ...attackers];
+    const captain = all.find((p) => p.isCaptain) ?? goalkeeper;
+
+    // `points` is already doubled for the captain; recover base to total once,
+    // then add the captain's base again for the doubling (matches selectTeam).
+    const baseTotal = all.reduce(
+      (sum, p) => sum + (p.isCaptain ? p.points / 2 : p.points),
+      0,
+    );
+    const totalPoints = baseTotal + captain.points / 2;
+
+    return {
+      id: t.id,
+      name: t.name,
+      subtitle: t.subtitle,
+      accent: t.accent,
+      team: {
+        goalkeeper,
+        defenders,
+        midfielders,
+        attackers,
+        captain,
+        totalPoints,
+      },
+    };
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Swedish broadcasts
 // ---------------------------------------------------------------------------
 

@@ -233,10 +233,12 @@ export function MatchResultCard({ match }: { match: MatchInfo }) {
         className="w-full px-5 py-4 flex items-center gap-3 hover:bg-white/5 transition-colors text-left"
       >
         <div
-          className={`flex-1 flex items-center justify-end gap-2 text-sm sm:text-base ${styles.home}`}
+          className={`flex-1 min-w-0 flex flex-col items-center gap-1 sm:flex-row sm:items-center sm:justify-end sm:gap-2 text-sm sm:text-base ${styles.home}`}
         >
-          <span className="truncate">{match.homeTeamName}</span>
           {flagImg(match.homeCountryCode, 5)}
+          <span className="max-w-full break-words text-center leading-tight sm:order-first sm:truncate sm:text-right">
+            {match.homeTeamName}
+          </span>
         </div>
 
         <div className="flex items-center gap-1.5 min-w-[80px] justify-center shrink-0">
@@ -250,10 +252,12 @@ export function MatchResultCard({ match }: { match: MatchInfo }) {
         </div>
 
         <div
-          className={`flex-1 flex items-center gap-2 text-sm sm:text-base ${styles.away}`}
+          className={`flex-1 min-w-0 flex flex-col items-center gap-1 sm:flex-row sm:items-center sm:justify-start sm:gap-2 text-sm sm:text-base ${styles.away}`}
         >
           {flagImg(match.awayCountryCode, 5)}
-          <span className="truncate">{match.awayTeamName}</span>
+          <span className="max-w-full break-words text-center leading-tight sm:truncate sm:text-left">
+            {match.awayTeamName}
+          </span>
         </div>
 
         <span
