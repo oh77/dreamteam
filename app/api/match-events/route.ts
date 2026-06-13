@@ -10,6 +10,8 @@ export async function GET(request: NextRequest) {
   const awayTeamId = p.get("awayTeamId") ?? "";
   const homeTeamName = p.get("homeTeamName") ?? "";
   const awayTeamName = p.get("awayTeamName") ?? "";
+  const homeCountryCode = p.get("homeCountryCode") ?? "";
+  const awayCountryCode = p.get("awayCountryCode") ?? "";
   const homeScore = Number(p.get("homeScore") ?? 0);
   const awayScore = Number(p.get("awayScore") ?? 0);
 
@@ -25,11 +27,15 @@ export async function GET(request: NextRequest) {
     stageId,
     homeTeamId,
     homeTeamName,
+    homeCountryCode,
     awayTeamId,
     awayTeamName,
+    awayCountryCode,
     homeScore,
     awayScore,
     finished: true,
+    live: false,
+    matchMinute: null,
     date: null,
     stageName: null,
   };

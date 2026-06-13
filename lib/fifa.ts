@@ -20,13 +20,22 @@ export interface MatchInfo {
   stageId: string;
   homeTeamId: string;
   homeTeamName: string;
+  homeCountryCode: string;
   awayTeamId: string;
   awayTeamName: string;
+  awayCountryCode: string;
   homeScore: number;
   awayScore: number;
   finished: boolean;
+  live: boolean;
+  matchMinute: string | null;
   date: string | null;
   stageName: string | null;
+}
+
+export function flagUrl(countryCode: string): string {
+  if (!countryCode) return "";
+  return `https://api.fifa.com/api/v3/picture/flags-sq-2/${countryCode}`;
 }
 
 export interface FifaPlayer {
@@ -51,6 +60,10 @@ export interface TimelineEvent {
   playerId: string;
   teamId: string;
   minute: number;
+  // Display string preserving stoppage time / half-time, e.g. "62'", "90'+7'", "HT".
+  minuteLabel: string;
+  // On a SubstituteOut: the player coming on (keeps the in/out pair linked).
+  subInId?: string;
 }
 
 export interface MatchLineup {
@@ -99,16 +112,19 @@ export interface SelectedTeam {
 export interface FormattedPlayer {
   name: string;
   team: string;
+  countryCode: string;
   position: Position;
   points: number;
   matchesPlayed: number;
   breakdown: PlayerTournamentStats["breakdown"];
+  baseBreakdown: PlayerTournamentStats["breakdown"];
   isCaptain: boolean;
 }
 
 export interface PipelineResult {
   players: PlayerTournamentStats[];
   matches: MatchInfo[];
+  teamCountry: Record<string, string>;
   fetchedAt: string;
 }
 
@@ -119,6 +135,7 @@ export interface PipelineResult {
 async function fifaFetch<T>(
   path: string,
   params: Record<string, string> = {},
+  fetchOpts: RequestInit = {},
 ): Promise<T> {
   const url = new URL(`${BASE_URL}${path}`);
   url.searchParams.set("language", LANG);
@@ -127,6 +144,7 @@ async function fifaFetch<T>(
   const res = await fetch(url.toString(), {
     headers: { Accept: "application/json", "User-Agent": "Mozilla/5.0" },
     next: { revalidate: 300 },
+    ...fetchOpts,
   });
 
   if (!res.ok) throw new Error(`FIFA API ${res.status}: ${url}`);
@@ -153,8 +171,13 @@ function mapPosition(pos: number | string | undefined): Position {
   return "MID";
 }
 
+// FIFA MatchStatus: 0 = finished, 1 = scheduled, 3 = in play (live)
 function isFinished(status: number): boolean {
   return status === 0;
+}
+
+function isLive(status: number): boolean {
+  return status === 3;
 }
 
 // ---------------------------------------------------------------------------
@@ -202,16 +225,22 @@ async function fetchAllMatches(): Promise<MatchInfo[]> {
     const results: any[] = data.Results ?? data.results ?? [];
 
     for (const m of results) {
+      const status = m.MatchStatus ?? m.Status ?? 0;
+      const live = isLive(status);
       matches.push({
         matchId: String(m.IdMatch ?? m.MatchId ?? ""),
         stageId: String(m.IdStage ?? m.StageId ?? ""),
         homeTeamId: String(m.Home?.IdTeam ?? m.HomeTeamId ?? ""),
         homeTeamName: localName(m.Home?.TeamName),
+        homeCountryCode: String(m.Home?.IdCountry ?? m.HomeTeamIdCountry ?? ""),
         awayTeamId: String(m.Away?.IdTeam ?? m.AwayTeamId ?? ""),
         awayTeamName: localName(m.Away?.TeamName),
+        awayCountryCode: String(m.Away?.IdCountry ?? m.AwayTeamIdCountry ?? ""),
         homeScore: Number(m.Home?.Score ?? m.HomeTeamScore ?? 0) || 0,
         awayScore: Number(m.Away?.Score ?? m.AwayTeamScore ?? 0) || 0,
-        finished: isFinished(m.MatchStatus ?? m.Status ?? 0),
+        finished: isFinished(status),
+        live,
+        matchMinute: live ? (m.MatchTime ?? null) : null,
         date: m.Date ?? m.LocalDate ?? null,
         stageName: localName(m.StageName) || null,
       });
@@ -282,13 +311,21 @@ function parseEvent(e: any): TimelineEvent[] {
   const typeId = e.Type;
   const playerId = String(e.IdPlayer ?? "");
   const teamId = String(e.IdTeam ?? "");
-  const minute =
-    parseInt(String(e.MatchMinute ?? e.Minute ?? "0").replace(/\D/g, ""), 10) ||
-    0;
+  const rawMin = String(e.MatchMinute ?? e.Minute ?? "").trim();
+  // `minute` is the leading match minute used for scoring windows — parse only
+  // the leading number so stoppage time stays in range (e.g. "45'+5'" → 45,
+  // "90'+8'" → 90), not the digits-concatenated "455"/"908".
+  // `minuteLabel` carries the human display (stoppage time / half-time).
+  const minute = parseInt(rawMin, 10) || 0;
+  const minuteLabel = rawMin
+    ? rawMin
+    : e.Period === 4
+      ? "HT" // half-time substitution: API sends an empty MatchMinute
+      : `${minute}'`;
 
   if (!playerId || !teamId) return [];
 
-  const base = { playerId, teamId, minute };
+  const base = { playerId, teamId, minute, minuteLabel };
 
   const desc: string = (
     (
@@ -298,10 +335,10 @@ function parseEvent(e: any): TimelineEvent[] {
     )?.find((l) => l.Locale === "en-GB")?.Description ?? ""
   ).toLowerCase();
 
-  if (typeId === 0 || desc === "goal!") {
-    if (desc.startsWith("own goal")) return [{ ...base, type: "OwnGoal" }];
-    return [{ ...base, type: "Goal" }];
-  }
+  // Own goals come through as Type 34 / "Own goal" (not Type 0). Check first.
+  if (typeId === 34 || desc.startsWith("own goal"))
+    return [{ ...base, type: "OwnGoal" }];
+  if (typeId === 0 || desc === "goal!") return [{ ...base, type: "Goal" }];
   if (typeId === 2 || desc.includes("yellow card"))
     return [{ ...base, type: "YellowCard" }];
   if (desc.includes("red card")) return [{ ...base, type: "RedCard" }];
@@ -309,9 +346,17 @@ function parseEvent(e: any): TimelineEvent[] {
     return [{ ...base, type: "YellowRedCard" }];
   if (desc.includes("substitut")) {
     const subInId = String(e.IdSubPlayer ?? "");
-    const out: TimelineEvent[] = [{ ...base, type: "SubstituteOut" }];
+    const out: TimelineEvent[] = [
+      { ...base, type: "SubstituteOut", subInId: subInId || undefined },
+    ];
     if (subInId)
-      out.push({ playerId: subInId, teamId, minute, type: "SubstituteIn" });
+      out.push({
+        playerId: subInId,
+        teamId,
+        minute,
+        minuteLabel,
+        type: "SubstituteIn",
+      });
     return out;
   }
 
@@ -553,11 +598,16 @@ export async function runPipeline(): Promise<PipelineResult> {
   );
 
   const teamMeta = new Map<string, string>();
+  const teamCountry: Record<string, string> = {};
   for (const m of allMatches) {
     if (m.homeTeamId && m.homeTeamName !== "Unknown")
       teamMeta.set(m.homeTeamId, m.homeTeamName);
     if (m.awayTeamId && m.awayTeamName !== "Unknown")
       teamMeta.set(m.awayTeamId, m.awayTeamName);
+    if (m.homeTeamId && m.homeCountryCode)
+      teamCountry[m.homeTeamId] = m.homeCountryCode;
+    if (m.awayTeamId && m.awayCountryCode)
+      teamCountry[m.awayTeamId] = m.awayCountryCode;
   }
 
   const squadByTeam = new Map<string, FifaPlayer[]>();
@@ -601,7 +651,12 @@ export async function runPipeline(): Promise<PipelineResult> {
       players.push(aggregatePlayerStats(player, msList));
   }
 
-  return { players, matches: allMatches, fetchedAt: new Date().toISOString() };
+  return {
+    players,
+    matches: allMatches,
+    teamCountry,
+    fetchedAt: new Date().toISOString(),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -611,19 +666,37 @@ export async function runPipeline(): Promise<PipelineResult> {
 export function selectTeam(
   allStats: PlayerTournamentStats[],
   mode: "best" | "worst",
+  teamCountry: Record<string, string> = {},
+  maxPerTeam = Number.POSITIVE_INFINITY,
 ): SelectedTeam {
   const positions: Position[] = ["GK", "DEF", "MID", "ATT"];
   const counts: Record<Position, number> = { GK: 1, DEF: 3, MID: 4, ATT: 3 };
   const dir = mode === "best" ? "desc" : "asc";
 
+  // Rank ALL players together, then walk that single list filling position
+  // slots top-down. This way the team-rule budget (max N per team) is spent on
+  // the globally highest scorers — a top attacker is never blocked because two
+  // lower-scoring players from his nation were processed in an earlier position.
+  const ranked = [...allStats].sort((a, b) =>
+    dir === "desc" ? b.points - a.points : a.points - b.points,
+  );
+
+  const teamCount = new Map<string, number>();
   const selectedByPos = new Map<Position, PlayerTournamentStats[]>();
-  for (const pos of positions) {
-    const pool = allStats
-      .filter((s) => s.player.position === pos)
-      .sort((a, b) =>
-        dir === "desc" ? b.points - a.points : a.points - b.points,
-      );
-    selectedByPos.set(pos, pool.slice(0, counts[pos]));
+  for (const pos of positions) selectedByPos.set(pos, []);
+  const squadSize = positions.reduce((n, pos) => n + counts[pos], 0);
+  let picked = 0;
+
+  for (const p of ranked) {
+    if (picked >= squadSize) break;
+    const pos = p.player.position;
+    const slot = selectedByPos.get(pos);
+    if (!slot || slot.length >= counts[pos]) continue; // position already full
+    const count = teamCount.get(p.player.teamId) ?? 0;
+    if (count >= maxPerTeam) continue; // team rule reached
+    slot.push(p);
+    teamCount.set(p.player.teamId, count + 1);
+    picked++;
   }
 
   const allSelected = [...selectedByPos.values()].flat();
@@ -644,6 +717,7 @@ export function selectTeam(
     return {
       name: p.player.name,
       team: p.player.teamName,
+      countryCode: teamCountry[p.player.teamId] ?? "",
       position: p.player.position,
       points: p.points * multiplier,
       matchesPlayed: p.matchesPlayed,
@@ -652,6 +726,7 @@ export function selectTeam(
             Object.entries(p.breakdown).map(([k, v]) => [k, (v as number) * 2]),
           ) as PlayerTournamentStats["breakdown"])
         : p.breakdown,
+      baseBreakdown: p.breakdown,
       isCaptain,
     };
   };
@@ -673,33 +748,105 @@ export function selectTeam(
 }
 
 // ---------------------------------------------------------------------------
+// Swedish broadcasts
+// ---------------------------------------------------------------------------
+
+export interface BroadcastSource {
+  idChannel: string;
+  name: string;
+  logo: string;
+  url: string;
+  language: string;
+}
+
+export async function fetchSwedishBroadcasts(): Promise<
+  Record<string, BroadcastSource[]>
+> {
+  "use cache";
+  cacheTag("fifa-broadcasts");
+  cacheLife("hours");
+
+  try {
+    // Response is ~9MB — skip fetch-level cache (2MB limit); "use cache" above caches the processed result
+    // biome-ignore lint/suspicious/noExplicitAny: FIFA API returns untyped JSON
+    const data = await fifaFetch<any>(
+      `/watch/season/${SEASON_ID}`,
+      {},
+      { cache: "no-store" },
+    );
+    // biome-ignore lint/suspicious/noExplicitAny: FIFA API returns untyped JSON
+    const results: any[] = data.Results ?? [];
+
+    const sweEntry = results.find(
+      (r) => r.IdCountryIso3166Alpha2 === "SE" || r.IdCountry === "SWE",
+    );
+    if (!sweEntry) return {};
+
+    const record: Record<string, BroadcastSource[]> = {};
+    // biome-ignore lint/suspicious/noExplicitAny: FIFA API returns untyped JSON
+    for (const m of sweEntry.Matches ?? ([] as any[])) {
+      const matchId = String(m.IdMatch ?? "");
+      if (!matchId) continue;
+      // biome-ignore lint/suspicious/noExplicitAny: FIFA API returns untyped JSON
+      record[matchId] = (m.Sources ?? ([] as any[])).map((s: any) => ({
+        idChannel: String(s.IdChannel ?? ""),
+        name: String(s.Name ?? ""),
+        logo: String(s.Logo ?? ""),
+        url: String(s.TvChannelUrl ?? s.Url ?? ""),
+        language: String(s.Language ?? ""),
+      }));
+    }
+    return record;
+  } catch {
+    return {};
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Match event summary (for results page fold-down)
 // ---------------------------------------------------------------------------
 
-export interface MatchGoalEvent {
-  minute: number;
+export interface MatchPlayerPoints {
   playerName: string;
   teamId: string;
-  isOwnGoal: boolean;
+  countryCode: string;
+  position: Position;
+  goalsScored: number;
+  ownGoals: number;
+  yellowCards: number;
+  redCards: number;
+  cleanSheet: boolean;
+  goalsConceded: number;
+  specialPoints: number;
 }
 
-export interface MatchCardEvent {
-  minute: number;
-  playerName: string;
-  teamId: string;
-  isDoubleYellow: boolean;
-}
+export type TimelineEntryKind =
+  | "goal"
+  | "owngoal"
+  | "yellow"
+  | "red"
+  | "yellowred"
+  | "sub";
 
-export interface MatchCleanSheet {
-  playerName: string;
-  teamId: string;
+export interface MatchTimelineEntry {
+  minute: number; // sort key (leading minute; half-time ≈ 45)
+  minuteLabel: string; // display, e.g. "62'", "90'+7'", "HT"
+  side: "home" | "away";
+  kind: TimelineEntryKind;
+  player: string;
+  // For substitutions: the player coming on (`player` is the one going off).
+  subIn?: string;
 }
 
 export interface MatchEventSummary {
-  goals: MatchGoalEvent[];
-  yellowCards: MatchCardEvent[];
-  redCards: MatchCardEvent[];
-  cleanSheets: MatchCleanSheet[];
+  homeOutcome: "WIN" | "DRAW" | "LOSS";
+  awayOutcome: "WIN" | "DRAW" | "LOSS";
+  homeCountryCode: string;
+  awayCountryCode: string;
+  homeResultPoints: number;
+  awayResultPoints: number;
+  players: MatchPlayerPoints[];
+  timeline: MatchTimelineEntry[];
 }
 
 export async function getMatchEventSummary(
@@ -712,70 +859,139 @@ export async function getMatchEventSummary(
     fetchSquad(match.awayTeamId, match.awayTeamName),
   ]);
 
-  const playerMap = new Map<string, string>();
-  for (const p of [...homeSquad, ...awaySquad]) playerMap.set(p.id, p.name);
+  const allPlayers = new Map<string, FifaPlayer>();
+  for (const p of [...homeSquad, ...awaySquad]) allPlayers.set(p.id, p);
 
-  const goals: MatchGoalEvent[] = events
-    .filter((e) => e.type === "Goal" || e.type === "OwnGoal")
-    .map((e) => ({
-      minute: e.minute,
-      playerName: playerMap.get(e.playerId) ?? "Unknown",
-      // own goal is credited to the opposing team
-      teamId:
-        e.type === "OwnGoal"
-          ? e.teamId === match.homeTeamId
-            ? match.awayTeamId
-            : match.homeTeamId
-          : e.teamId,
-      isOwnGoal: e.type === "OwnGoal",
-    }))
-    .sort((a, b) => a.minute - b.minute);
+  const squadByTeam = new Map<string, FifaPlayer[]>([
+    [match.homeTeamId, homeSquad],
+    [match.awayTeamId, awaySquad],
+  ]);
 
-  const yellowCards: MatchCardEvent[] = events
-    .filter((e) => e.type === "YellowCard" || e.type === "YellowRedCard")
-    .map((e) => ({
-      minute: e.minute,
-      playerName: playerMap.get(e.playerId) ?? "Unknown",
-      teamId: e.teamId,
-      isDoubleYellow: e.type === "YellowRedCard",
-    }))
-    .sort((a, b) => a.minute - b.minute);
+  const matchStats = computeMatchStats(
+    match,
+    events,
+    lineup,
+    allPlayers,
+    squadByTeam,
+  );
 
-  const redCards: MatchCardEvent[] = events
-    .filter((e) => e.type === "RedCard" || e.type === "YellowRedCard")
-    .map((e) => ({
-      minute: e.minute,
-      playerName: playerMap.get(e.playerId) ?? "Unknown",
-      teamId: e.teamId,
-      isDoubleYellow: e.type === "YellowRedCard",
-    }))
-    .sort((a, b) => a.minute - b.minute);
+  const homeWins = match.homeScore > match.awayScore;
+  const awayWins = match.awayScore > match.homeScore;
+  const homeOutcome: "WIN" | "DRAW" | "LOSS" = homeWins
+    ? "WIN"
+    : awayWins
+      ? "LOSS"
+      : "DRAW";
+  const awayOutcome: "WIN" | "DRAW" | "LOSS" = awayWins
+    ? "WIN"
+    : homeWins
+      ? "LOSS"
+      : "DRAW";
 
-  // Clean sheets: GK of any team that conceded 0 goals
-  const cleanSheets: MatchCleanSheet[] = [];
+  const players: MatchPlayerPoints[] = matchStats
+    .filter(
+      (s) =>
+        s.goalsScored > 0 ||
+        s.ownGoals > 0 ||
+        s.yellowCards > 0 ||
+        s.redCards > 0 ||
+        s.cleanSheet ||
+        s.goalsConceded > 0,
+    )
+    .map((s) => {
+      const player = allPlayers.get(s.playerId);
+      if (!player) return null;
+      const isHome = s.teamId === match.homeTeamId;
+      const countryCode = isHome
+        ? match.homeCountryCode
+        : match.awayCountryCode;
 
-  const findGk = (squad: FifaPlayer[], teamId: string, conceded: number) => {
-    if (conceded !== 0) return;
-    const gks = squad.filter((p) => p.position === "GK");
-    let gkId: string | undefined;
-    if (lineup) {
-      const ids =
-        teamId === match.homeTeamId
-          ? lineup.homeTeamPlayerIds
-          : lineup.awayTeamPlayerIds;
-      gkId = gks.find((gk) => ids.has(gk.id))?.id;
-    }
-    if (!gkId) gkId = gks[0]?.id;
-    if (gkId) {
-      cleanSheets.push({
-        playerName: playerMap.get(gkId) ?? gks[0]?.name ?? "Unknown",
-        teamId,
+      let pts = 0;
+      pts += s.goalsScored * goalPoints(player.position);
+      pts += s.ownGoals * POINTS.OWN_GOAL;
+      pts += s.yellowCards * POINTS.YELLOW_CARD;
+      pts += s.redCards * POINTS.RED_CARD;
+      if (s.cleanSheet) pts += POINTS.CLEAN_SHEET_GK;
+      pts += s.goalsConceded * POINTS.GOAL_CONCEDED_GK;
+
+      return {
+        playerName: player.name,
+        teamId: s.teamId,
+        countryCode,
+        position: player.position,
+        goalsScored: s.goalsScored,
+        ownGoals: s.ownGoals,
+        yellowCards: s.yellowCards,
+        redCards: s.redCards,
+        cleanSheet: s.cleanSheet,
+        goalsConceded: s.goalsConceded,
+        specialPoints: pts,
+      };
+    })
+    .filter((p): p is MatchPlayerPoints => p !== null)
+    .sort((a, b) => b.specialPoints - a.specialPoints);
+
+  // Raw chronological event feed (goals, cards, subs) for the events view.
+  const nameOf = (id: string) => allPlayers.get(id)?.name ?? "Unknown";
+  const sideOf = (teamId: string): "home" | "away" =>
+    teamId === match.homeTeamId ? "home" : "away";
+  const kindByType: Partial<Record<TimelineEvent["type"], TimelineEntryKind>> =
+    {
+      Goal: "goal",
+      OwnGoal: "owngoal",
+      YellowCard: "yellow",
+      RedCard: "red",
+      YellowRedCard: "yellowred",
+    };
+
+  // Leading minute for sorting; half-time sits at ~45. Intra-minute and
+  // stoppage-time order is preserved by the (stable) sort + chronological feed.
+  const minuteKey = (label: string): number =>
+    label === "HT" ? 45 : parseInt(label, 10) || 0;
+
+  const timeline: MatchTimelineEntry[] = [];
+  for (const e of events) {
+    if (e.type === "SubstituteIn") continue; // handled alongside SubstituteOut
+    if (e.type === "SubstituteOut") {
+      timeline.push({
+        minute: minuteKey(e.minuteLabel),
+        minuteLabel: e.minuteLabel,
+        side: sideOf(e.teamId),
+        kind: "sub",
+        player: nameOf(e.playerId),
+        subIn: e.subInId ? nameOf(e.subInId) : undefined,
       });
+      continue;
     }
+    const kind = kindByType[e.type];
+    if (!kind) continue; // skip Unknown / unmapped
+    // Own goals count for the opponent, so show them on the benefiting side
+    // (with the scoring defender's name + "(OG)").
+    const scorerSide = sideOf(e.teamId);
+    const side: "home" | "away" =
+      kind === "owngoal"
+        ? scorerSide === "home"
+          ? "away"
+          : "home"
+        : scorerSide;
+    timeline.push({
+      minute: minuteKey(e.minuteLabel),
+      minuteLabel: e.minuteLabel,
+      side,
+      kind,
+      player: nameOf(e.playerId),
+    });
+  }
+  timeline.sort((a, b) => a.minute - b.minute);
+
+  return {
+    homeOutcome,
+    awayOutcome,
+    homeCountryCode: match.homeCountryCode,
+    awayCountryCode: match.awayCountryCode,
+    homeResultPoints: POINTS[homeOutcome],
+    awayResultPoints: POINTS[awayOutcome],
+    players,
+    timeline,
   };
-
-  findGk(homeSquad, match.homeTeamId, match.awayScore);
-  findGk(awaySquad, match.awayTeamId, match.homeScore);
-
-  return { goals, yellowCards, redCards, cleanSheets };
 }

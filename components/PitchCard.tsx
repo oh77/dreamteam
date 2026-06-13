@@ -39,17 +39,20 @@ export function PitchCard({ player }: { player: FormattedPlayer }) {
             C
           </span>
         )}
-        <span
-          className={`rounded px-1.5 py-0.5 text-[9px] font-bold uppercase ${posColor[player.position]}`}
-        >
-          {player.position}
-        </span>
         <span className="text-[11px] font-semibold leading-tight text-white line-clamp-2 w-full">
           {player.name.split(" ").slice(-1)[0]}
         </span>
-        <span className="text-[9px] text-white/50 leading-none line-clamp-1 w-full">
-          {player.team}
-        </span>
+        {player.countryCode ? (
+          <img
+            src={`https://api.fifa.com/api/v3/picture/flags-sq-2/${player.countryCode}`}
+            alt={player.team}
+            width={16}
+            height={16}
+            className="w-4 h-4 rounded-sm object-cover"
+          />
+        ) : (
+          <div className="w-4 h-4" />
+        )}
         <span
           className={`text-sm font-bold ${player.isCaptain ? "text-[color:var(--color-gold)]" : "text-white"}`}
         >
@@ -108,7 +111,7 @@ export function PitchCard({ player }: { player: FormattedPlayer }) {
             </div>
 
             <div className="space-y-2">
-              {Object.entries(player.breakdown).map(([key, value]) => {
+              {Object.entries(player.baseBreakdown).map(([key, value]) => {
                 const v = value as number;
                 if (v === 0) return null;
                 return (
@@ -128,6 +131,23 @@ export function PitchCard({ player }: { player: FormattedPlayer }) {
                   </div>
                 );
               })}
+              {player.isCaptain &&
+                (() => {
+                  const base = Object.values(player.baseBreakdown).reduce(
+                    (s, v) => s + (v as number),
+                    0,
+                  );
+                  return base !== 0 ? (
+                    <div className="flex items-center justify-between rounded-lg bg-[color:var(--color-gold)]/10 px-3 py-1.5 ring-1 ring-[color:var(--color-gold)]/20">
+                      <span className="text-sm text-[color:var(--color-gold)]/80">
+                        Captain ×2
+                      </span>
+                      <span className="text-sm font-semibold text-[color:var(--color-gold)]">
+                        +{base}
+                      </span>
+                    </div>
+                  ) : null;
+                })()}
             </div>
 
             <button

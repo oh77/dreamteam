@@ -1,6 +1,7 @@
-import { runPipeline } from "@/lib/fifa";
-import type { MatchInfo } from "@/lib/fifa";
+import { cacheLife, cacheTag } from "next/cache";
 import { MatchResultCard } from "@/components/MatchResultCard";
+import type { MatchInfo } from "@/lib/fifa";
+import { runPipeline } from "@/lib/fifa";
 
 function groupByDate(matches: MatchInfo[]): Map<string, MatchInfo[]> {
   const groups = new Map<string, MatchInfo[]>();
@@ -24,10 +25,15 @@ function formatDate(dateStr: string): string {
 }
 
 export default async function ResultsPage() {
+  "use cache";
+  cacheLife("minutes");
+  cacheTag("fifa-pipeline");
   const { matches } = await runPipeline();
   const finished = matches.filter((m) => m.finished);
+  // Live matches show here too, pinned above the finished results.
+  const shown = matches.filter((m) => m.finished || m.live);
 
-  if (finished.length === 0) {
+  if (shown.length === 0) {
     return (
       <div className="mx-auto max-w-3xl px-4 py-16 text-center">
         <div className="text-6xl mb-4">📅</div>
@@ -39,7 +45,8 @@ export default async function ResultsPage() {
     );
   }
 
-  const sorted = [...finished].sort((a, b) => {
+  const sorted = [...shown].sort((a, b) => {
+    if (a.live !== b.live) return a.live ? -1 : 1; // live first
     if (!a.date) return 1;
     if (!b.date) return -1;
     return b.date.localeCompare(a.date);

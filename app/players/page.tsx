@@ -1,7 +1,11 @@
+import { cacheLife, cacheTag } from "next/cache";
 import { PlayerTable } from "@/components/PlayerTable";
 import { runPipeline } from "@/lib/fifa";
 
 export default async function PlayersPage() {
+  "use cache";
+  cacheLife("minutes");
+  cacheTag("fifa-pipeline");
   const { players } = await runPipeline();
   const sorted = [...players].sort((a, b) => b.points - a.points);
 
