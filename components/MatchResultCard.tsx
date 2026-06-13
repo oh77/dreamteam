@@ -118,6 +118,7 @@ function EventLabel({ entry }: { entry: MatchTimelineEntry }) {
   return (
     <span className="text-xs text-white/80">
       {entry.player}
+      {entry.penalty && <span className="text-white/40"> (pen)</span>}
       {entry.kind === "owngoal" && (
         <span className="text-red-400/70"> (OG)</span>
       )}

@@ -64,6 +64,8 @@ export interface TimelineEvent {
   minuteLabel: string;
   // On a SubstituteOut: the player coming on (keeps the in/out pair linked).
   subInId?: string;
+  // Goal scored from a penalty.
+  penalty?: boolean;
 }
 
 export interface MatchLineup {
@@ -338,6 +340,9 @@ function parseEvent(e: any): TimelineEvent[] {
   // Own goals come through as Type 34 / "Own goal" (not Type 0). Check first.
   if (typeId === 34 || desc.startsWith("own goal"))
     return [{ ...base, type: "OwnGoal" }];
+  // Penalty goals are Type 41 — a normal goal for scoring, flagged for display.
+  if (typeId === 41 || desc === "penalty goal")
+    return [{ ...base, type: "Goal", penalty: true }];
   if (typeId === 0 || desc === "goal!") return [{ ...base, type: "Goal" }];
   if (typeId === 2 || desc.includes("yellow card"))
     return [{ ...base, type: "YellowCard" }];
@@ -836,6 +841,8 @@ export interface MatchTimelineEntry {
   player: string;
   // For substitutions: the player coming on (`player` is the one going off).
   subIn?: string;
+  // Goal scored from a penalty.
+  penalty?: boolean;
 }
 
 export interface MatchEventSummary {
@@ -980,6 +987,7 @@ export async function getMatchEventSummary(
       side,
       kind,
       player: nameOf(e.playerId),
+      penalty: e.penalty,
     });
   }
   timeline.sort((a, b) => a.minute - b.minute);
