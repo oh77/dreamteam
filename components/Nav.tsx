@@ -4,19 +4,19 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
 
-const links = [
+// Primary links stay as direct pills everywhere (incl. mobile); the rest
+// collapse into a "More" dropdown on mobile and show inline on desktop.
+const primary = [
   { href: "/best-team", label: "Best XI" },
   { href: "/worst-team", label: "Worst XI" },
-  { href: "/upcoming-games", label: "Upcoming" },
   { href: "/results", label: "Results" },
+];
+const rest = [
+  { href: "/upcoming-games", label: "Upcoming" },
   { href: "/players", label: "Players" },
+  { href: "/stats", label: "Stats" },
   { href: "/predictions", label: "AI Picks" },
 ];
-
-// Best/Worst stay as direct links everywhere; the rest collapse into a
-// dropdown on mobile.
-const primary = links.slice(0, 2);
-const rest = links.slice(2);
 
 function pillClass(active: boolean) {
   return `whitespace-nowrap rounded-full px-3 py-1.5 text-sm font-medium transition-colors ${

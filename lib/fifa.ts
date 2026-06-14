@@ -99,6 +99,15 @@ export interface PlayerTournamentStats {
     yellowCards: number;
     redCards: number;
   };
+  // Raw event counts (not points) — used for the Stats leaderboards.
+  totals: {
+    goals: number;
+    ownGoals: number;
+    yellowCards: number;
+    redCards: number;
+    cleanSheets: number;
+    goalsConceded: number;
+  };
   matchesPlayed: number;
 }
 
@@ -380,17 +389,23 @@ async function fetchMatchLineup(
     const home: Record<string, unknown> = data.Home ?? data.HomeTeam ?? {};
     const away: Record<string, unknown> = data.Away ?? data.AwayTeam ?? {};
 
+    // Only players who actually took the field: starters (Status 1) plus any
+    // substitute who came on. The roster array is the full squad, so unused
+    // bench players (incl. backup keepers) must be excluded.
     const extractIds = (team: Record<string, unknown>): Set<string> => {
-      const players = [
-        // biome-ignore lint/suspicious/noExplicitAny: FIFA API returns untyped JSON
-        ...((team.Players ?? team.StartingEleven ?? []) as any[]),
-        // biome-ignore lint/suspicious/noExplicitAny: FIFA API returns untyped JSON
-        ...((team.Substitutes ?? team.Bench ?? []) as any[]),
-      ];
       const ids = new Set<string>();
-      for (const p of players) {
+      // biome-ignore lint/suspicious/noExplicitAny: FIFA API returns untyped JSON
+      const roster = (team.Players ?? team.StartingEleven ?? []) as any[];
+      // If Status is present, 1 = starter; otherwise treat the list as starters.
+      const hasStatus = roster.some((p) => p.Status != null);
+      for (const p of roster) {
         const id = String(p.IdPlayer ?? p.PlayerId ?? "");
-        if (id) ids.add(id);
+        if (id && (!hasStatus || Number(p.Status) === 1)) ids.add(id);
+      }
+      // biome-ignore lint/suspicious/noExplicitAny: FIFA API returns untyped JSON
+      for (const s of (team.Substitutions ?? []) as any[]) {
+        const on = String(s.IdPlayerOn ?? "");
+        if (on) ids.add(on);
       }
       return ids;
     };
@@ -560,6 +575,14 @@ function aggregatePlayerStats(
     yellowCards: 0,
     redCards: 0,
   };
+  const totals = {
+    goals: 0,
+    ownGoals: 0,
+    yellowCards: 0,
+    redCards: 0,
+    cleanSheets: 0,
+    goalsConceded: 0,
+  };
   const pts = POINTS;
 
   for (const ms of matchStats) {
@@ -575,12 +598,20 @@ function aggregatePlayerStats(
     breakdown.ownGoals += ms.ownGoals * pts.OWN_GOAL;
     breakdown.yellowCards += ms.yellowCards * pts.YELLOW_CARD;
     breakdown.redCards += ms.redCards * pts.RED_CARD;
+
+    totals.goals += ms.goalsScored;
+    totals.ownGoals += ms.ownGoals;
+    totals.yellowCards += ms.yellowCards;
+    totals.redCards += ms.redCards;
+    totals.cleanSheets += ms.cleanSheet ? 1 : 0;
+    totals.goalsConceded += ms.goalsConceded;
   }
 
   return {
     player,
     points: Object.values(breakdown).reduce((a, b) => a + b, 0),
     breakdown,
+    totals,
     matchesPlayed: matchStats.length,
   };
 }
@@ -925,6 +956,185 @@ export function getSampleTeams(
       },
     };
   });
+}
+
+// ---------------------------------------------------------------------------
+// Stat leaderboards
+// ---------------------------------------------------------------------------
+
+export interface StatLeader {
+  playerId: string;
+  name: string;
+  teamName: string;
+  countryCode: string;
+  position: Position;
+  value: number;
+  matchesPlayed: number;
+}
+
+export interface StatLeaders {
+  scorers: StatLeader[];
+  yellowCards: StatLeader[];
+  redCards: StatLeader[];
+  gkConceded: StatLeader[];
+}
+
+export function getStatLeaders(
+  allStats: PlayerTournamentStats[],
+  teamCountry: Record<string, string> = {},
+  limit = 10,
+): StatLeaders {
+  const board = (
+    pick: (s: PlayerTournamentStats) => number,
+    opts: {
+      ascending?: boolean;
+      includeZero?: boolean;
+      filter?: (s: PlayerTournamentStats) => boolean;
+    } = {},
+  ): StatLeader[] => {
+    const {
+      ascending = false,
+      includeZero = false,
+      filter = () => true,
+    } = opts;
+    return (
+      allStats
+        .filter((s) => filter(s) && (includeZero || pick(s) > 0))
+        .map((s) => ({
+          playerId: s.player.id,
+          name: s.player.name,
+          teamName: s.player.teamName,
+          countryCode: teamCountry[s.player.teamId] ?? "",
+          position: s.player.position,
+          value: pick(s),
+          matchesPlayed: s.matchesPlayed,
+        }))
+        // Ties broken alphabetically for a stable order.
+        .sort(
+          (a, b) =>
+            (ascending ? a.value - b.value : b.value - a.value) ||
+            a.name.localeCompare(b.name),
+        )
+        .slice(0, limit)
+    );
+  };
+
+  return {
+    scorers: board((s) => s.totals.goals),
+    yellowCards: board((s) => s.totals.yellowCards),
+    redCards: board((s) => s.totals.redCards),
+    // Fewest conceded first; only keepers who have actually played, and a
+    // clean sheet (0 conceded) is the best result so zeros are included.
+    gkConceded: board((s) => s.totals.goalsConceded, {
+      ascending: true,
+      includeZero: true,
+      filter: (s) => s.player.position === "GK" && s.matchesPlayed > 0,
+    }),
+  };
+}
+
+export interface TeamStatLeader {
+  teamId: string;
+  teamName: string;
+  countryCode: string;
+  value: number;
+  matchesPlayed: number;
+}
+
+export interface TeamStatLeaders {
+  scorers: TeamStatLeader[];
+  yellowCards: TeamStatLeader[];
+  redCards: TeamStatLeader[];
+  conceded: TeamStatLeader[];
+}
+
+export function getTeamStatLeaders(
+  allStats: PlayerTournamentStats[],
+  matches: MatchInfo[],
+  limit = 5,
+): TeamStatLeaders {
+  interface Agg {
+    teamName: string;
+    countryCode: string;
+    scored: number;
+    conceded: number;
+    yellow: number;
+    red: number;
+    games: number;
+  }
+  const team = new Map<string, Agg>();
+  const ensure = (id: string, name: string, cc: string): Agg | null => {
+    if (!id) return null;
+    let t = team.get(id);
+    if (!t) {
+      t = {
+        teamName: name,
+        countryCode: cc,
+        scored: 0,
+        conceded: 0,
+        yellow: 0,
+        red: 0,
+        games: 0,
+      };
+      team.set(id, t);
+    }
+    return t;
+  };
+
+  // Goals for/against come from the scorelines (accurate, incl. own goals).
+  for (const m of matches) {
+    if (!m.finished) continue;
+    const h = ensure(m.homeTeamId, m.homeTeamName, m.homeCountryCode);
+    const a = ensure(m.awayTeamId, m.awayTeamName, m.awayCountryCode);
+    if (h) {
+      h.scored += m.homeScore;
+      h.conceded += m.awayScore;
+      h.games += 1;
+    }
+    if (a) {
+      a.scored += m.awayScore;
+      a.conceded += m.homeScore;
+      a.games += 1;
+    }
+  }
+  // Cards are summed from player events.
+  for (const s of allStats) {
+    const t = team.get(s.player.teamId);
+    if (!t) continue;
+    t.yellow += s.totals.yellowCards;
+    t.red += s.totals.redCards;
+  }
+
+  const entries = [...team.entries()];
+  const board = (
+    pick: (a: Agg) => number,
+    opts: { ascending?: boolean; includeZero?: boolean } = {},
+  ): TeamStatLeader[] => {
+    const { ascending = false, includeZero = false } = opts;
+    return entries
+      .filter(([, a]) => includeZero || pick(a) > 0)
+      .map(([teamId, a]) => ({
+        teamId,
+        teamName: a.teamName,
+        countryCode: a.countryCode,
+        value: pick(a),
+        matchesPlayed: a.games,
+      }))
+      .sort(
+        (x, y) =>
+          (ascending ? x.value - y.value : y.value - x.value) ||
+          x.teamName.localeCompare(y.teamName),
+      )
+      .slice(0, limit);
+  };
+
+  return {
+    scorers: board((a) => a.scored),
+    yellowCards: board((a) => a.yellow),
+    redCards: board((a) => a.red),
+    // Fewest conceded first; teams that have played are all eligible (0 = best).
+    conceded: board((a) => a.conceded, { ascending: true, includeZero: true }),
+  };
 }
 
 // ---------------------------------------------------------------------------
