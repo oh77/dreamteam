@@ -29,10 +29,10 @@ const outcomeLabel: Record<"WIN" | "DRAW" | "LOSS", string> = {
   LOSS: "LOSS",
 };
 
-const outcomeColor: Record<"WIN" | "DRAW" | "LOSS", string> = {
-  WIN: "text-emerald-400",
-  DRAW: "text-amber-400",
-  LOSS: "text-red-400/70",
+const outcomeChip: Record<"WIN" | "DRAW" | "LOSS", string> = {
+  WIN: "bg-emerald-500/20 text-emerald-300",
+  DRAW: "bg-amber-400/20 text-amber-300",
+  LOSS: "bg-red-500/20 text-red-300",
 };
 
 function flagImg(countryCode: string, size = 5) {
@@ -57,32 +57,26 @@ const posColor: Record<string, string> = {
 };
 
 function PlayerPointsRow({ player }: { player: MatchPlayerPoints }) {
+  // One icon per occurrence (e.g. two goals → ⚽⚽).
   const icons: string[] = [];
-  if (player.goalsScored > 0)
-    icons.push(`⚽${player.goalsScored > 1 ? `×${player.goalsScored}` : ""}`);
-  if (player.ownGoals > 0)
-    icons.push(`⚽(OG)${player.ownGoals > 1 ? `×${player.ownGoals}` : ""}`);
+  if (player.goalsScored > 0) icons.push("⚽".repeat(player.goalsScored));
+  if (player.ownGoals > 0) icons.push(`${"⚽".repeat(player.ownGoals)}(OG)`);
   if (player.cleanSheet) icons.push("🧤");
-  if (player.goalsConceded > 0)
-    icons.push(
-      `⚽−${player.goalsConceded > 1 ? `×${player.goalsConceded}` : ""}`,
-    );
-  if (player.yellowCards > 0)
-    icons.push(`🟨${player.yellowCards > 1 ? `×${player.yellowCards}` : ""}`);
-  if (player.redCards > 0)
-    icons.push(`🟥${player.redCards > 1 ? `×${player.redCards}` : ""}`);
+  if (player.goalsConceded > 0) icons.push("🔴".repeat(player.goalsConceded));
+  if (player.yellowCards > 0) icons.push("🟨".repeat(player.yellowCards));
+  if (player.redCards > 0) icons.push("🟥".repeat(player.redCards));
 
   const pts = player.specialPoints;
 
   return (
     <div className="flex items-center gap-2 py-1 text-xs">
-      <span className="text-white/80 min-w-0 truncate flex-1">
-        {player.playerName}
-      </span>
       <span
         className={`rounded px-1 py-0.5 text-[10px] font-bold uppercase shrink-0 ${posColor[player.position]}`}
       >
         {player.position}
+      </span>
+      <span className="text-white/80 min-w-0 truncate flex-1">
+        {player.playerName}
       </span>
       <span className="text-white/40 shrink-0 text-[11px]">
         {icons.join(" ")}
@@ -105,25 +99,69 @@ const kindMarker: Record<TimelineEntryKind, string> = {
   sub: "🔄",
 };
 
-function EventLabel({ entry }: { entry: MatchTimelineEntry }) {
+function lastName(name: string | undefined): string {
+  if (!name) return "—";
+  const parts = name.trim().split(/\s+/);
+  // Drop only the given name so multi-word surnames survive (e.g.
+  // "Virgil VAN DIJK" → "VAN DIJK", "Scott MC TOMINAY" → "MC TOMINAY").
+  return parts.length > 1 ? parts.slice(1).join(" ") : name;
+}
+
+function EventContent({
+  entry,
+  align,
+}: {
+  entry: MatchTimelineEntry;
+  align: "left" | "right";
+}) {
+  // Substitution: two rows — player on (↙) above, player off (↗) below.
   if (entry.kind === "sub") {
     return (
-      <span className="inline-flex items-center gap-1 text-xs">
-        <span className="text-emerald-400">{entry.subIn ?? "—"}</span>
-        <span className="text-white/25">↔</span>
-        <span className="text-red-400/60">{entry.player}</span>
-      </span>
+      <div
+        className={`flex flex-col gap-0.5 text-xs ${align === "right" ? "items-end" : "items-start"}`}
+      >
+        <span className="inline-flex items-center gap-1 text-emerald-400">
+          <span className="text-[10px] leading-none">←</span>
+          <span>{lastName(entry.subIn)}</span>
+        </span>
+        <span className="inline-flex items-center gap-1 text-red-400/70">
+          <span className="text-[10px] leading-none">→</span>
+          <span>{lastName(entry.player)}</span>
+        </span>
+      </div>
     );
   }
-  return (
+
+  const marker = (
+    <span className="shrink-0 text-xs leading-none">
+      {kindMarker[entry.kind]}
+    </span>
+  );
+  const label = (
     <span className="text-xs text-white/80">
-      {entry.player}
+      {lastName(entry.player)}
       {entry.penalty && <span className="text-white/40"> (pen)</span>}
       {entry.kind === "owngoal" && (
         <span className="text-red-400/70"> (OG)</span>
       )}
       {entry.kind === "yellowred" && (
-        <span className="text-white/40"> (2nd yellow)</span>
+        <span className="text-white/40"> (2nd Y)</span>
+      )}
+    </span>
+  );
+  // Keep the icon nearest the centered minute column.
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      {align === "right" ? (
+        <>
+          {label}
+          {marker}
+        </>
+      ) : (
+        <>
+          {marker}
+          {label}
+        </>
       )}
     </span>
   );
@@ -131,31 +169,16 @@ function EventLabel({ entry }: { entry: MatchTimelineEntry }) {
 
 function EventRow({ entry }: { entry: MatchTimelineEntry }) {
   const isHome = entry.side === "home";
-  const marker = (
-    <span className="shrink-0 text-xs leading-none">
-      {kindMarker[entry.kind]}
-    </span>
-  );
   return (
     <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2 py-1">
       <div className="flex items-center justify-end gap-1.5">
-        {isHome && (
-          <>
-            <EventLabel entry={entry} />
-            {marker}
-          </>
-        )}
+        {isHome && <EventContent entry={entry} align="right" />}
       </div>
       <div className="min-w-[2.5rem] text-center text-[11px] font-bold tabular-nums text-white/40">
         {entry.minuteLabel}
       </div>
       <div className="flex items-center justify-start gap-1.5">
-        {!isHome && (
-          <>
-            {marker}
-            <EventLabel entry={entry} />
-          </>
-        )}
+        {!isHome && <EventContent entry={entry} align="left" />}
       </div>
     </div>
   );
@@ -177,6 +200,64 @@ function EventsTimeline({ timeline }: { timeline: MatchTimelineEntry[] }) {
           entry={e}
         />
       ))}
+    </div>
+  );
+}
+
+// Per-player match-result points (awarded to every player on the team).
+function ResultPointsRow({
+  outcome,
+  pts,
+}: {
+  outcome: "WIN" | "DRAW" | "LOSS";
+  pts: number;
+}) {
+  return (
+    <div className="flex items-center gap-2 py-1 text-xs">
+      <span
+        className={`shrink-0 rounded px-1 py-0.5 text-[10px] font-bold uppercase ${outcomeChip[outcome]}`}
+      >
+        {outcomeLabel[outcome]}
+      </span>
+      <span className="min-w-0 flex-1 truncate text-white/50 italic">
+        Match result (all players)
+      </span>
+      <span
+        className={`w-8 shrink-0 text-right font-bold tabular-nums ${pts > 0 ? "text-emerald-400" : pts < 0 ? "text-red-400" : "text-white/30"}`}
+      >
+        {pts > 0 ? `+${pts}` : pts}
+      </span>
+    </div>
+  );
+}
+
+function TeamPointsBlock({
+  name,
+  countryCode,
+  outcome,
+  pts,
+  players,
+}: {
+  name: string;
+  countryCode: string;
+  outcome: "WIN" | "DRAW" | "LOSS";
+  pts: number;
+  players: MatchPlayerPoints[];
+}) {
+  return (
+    <div>
+      <div className="mb-1 flex items-center gap-1.5">
+        {flagImg(countryCode, 4)}
+        <span className="text-[10px] font-bold uppercase tracking-widest text-white/30">
+          {name}
+        </span>
+      </div>
+      <div className="divide-y divide-white/5">
+        <ResultPointsRow outcome={outcome} pts={pts} />
+        {players.map((p) => (
+          <PlayerPointsRow key={p.playerName} player={p} />
+        ))}
+      </div>
     </div>
   );
 }
@@ -222,7 +303,6 @@ export function MatchResultCard({ match }: { match: MatchInfo }) {
     data?.players.filter((p) => p.teamId === match.homeTeamId) ?? [];
   const awayPlayers =
     data?.players.filter((p) => p.teamId === match.awayTeamId) ?? [];
-  const hasPlayers = homePlayers.length > 0 || awayPlayers.length > 0;
 
   return (
     <div className="glass rounded-2xl overflow-hidden">
@@ -352,89 +432,20 @@ export function MatchResultCard({ match }: { match: MatchInfo }) {
                 </div>
               ) : (
                 <div className="space-y-4">
-                  {/* Match result row */}
-                  <div className="grid grid-cols-2 gap-3">
-                    {(
-                      [
-                        {
-                          teamName: match.homeTeamName,
-                          countryCode: data.homeCountryCode,
-                          outcome: data.homeOutcome,
-                          pts: data.homeResultPoints,
-                        },
-                        {
-                          teamName: match.awayTeamName,
-                          countryCode: data.awayCountryCode,
-                          outcome: data.awayOutcome,
-                          pts: data.awayResultPoints,
-                        },
-                      ] as const
-                    ).map((side) => (
-                      <div
-                        key={side.teamName}
-                        className="flex items-center gap-2 rounded-xl bg-white/5 px-3 py-2"
-                      >
-                        {flagImg(side.countryCode, 5)}
-                        <div className="min-w-0">
-                          <div className="text-xs text-white/50 truncate">
-                            {side.teamName}
-                          </div>
-                          <div
-                            className={`text-sm font-bold ${outcomeColor[side.outcome]}`}
-                          >
-                            {outcomeLabel[side.outcome]}{" "}
-                            <span className="text-white/40 font-normal text-xs">
-                              {side.pts > 0 ? `+${side.pts}` : side.pts}{" "}
-                              pts/player
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-
-                  {/* Player points */}
-                  {hasPlayers && (
-                    <div className="space-y-3">
-                      {homePlayers.length > 0 && (
-                        <div>
-                          <div className="mb-1 flex items-center gap-1.5">
-                            {flagImg(data.homeCountryCode, 4)}
-                            <span className="text-[10px] font-bold uppercase tracking-widest text-white/30">
-                              {match.homeTeamName}
-                            </span>
-                          </div>
-                          <div className="divide-y divide-white/5">
-                            {homePlayers.map((p) => (
-                              <PlayerPointsRow key={p.playerName} player={p} />
-                            ))}
-                          </div>
-                        </div>
-                      )}
-
-                      {awayPlayers.length > 0 && (
-                        <div>
-                          <div className="mb-1 flex items-center gap-1.5">
-                            {flagImg(data.awayCountryCode, 4)}
-                            <span className="text-[10px] font-bold uppercase tracking-widest text-white/30">
-                              {match.awayTeamName}
-                            </span>
-                          </div>
-                          <div className="divide-y divide-white/5">
-                            {awayPlayers.map((p) => (
-                              <PlayerPointsRow key={p.playerName} player={p} />
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {!hasPlayers && (
-                    <p className="text-center text-xs text-white/30 py-2">
-                      No special events recorded
-                    </p>
-                  )}
+                  <TeamPointsBlock
+                    name={match.homeTeamName}
+                    countryCode={data.homeCountryCode}
+                    outcome={data.homeOutcome}
+                    pts={data.homeResultPoints}
+                    players={homePlayers}
+                  />
+                  <TeamPointsBlock
+                    name={match.awayTeamName}
+                    countryCode={data.awayCountryCode}
+                    outcome={data.awayOutcome}
+                    pts={data.awayResultPoints}
+                    players={awayPlayers}
+                  />
                 </div>
               )}
             </div>

@@ -1,6 +1,11 @@
 import { cacheLife, cacheTag } from "next/cache";
 import type { BroadcastSource, MatchInfo } from "@/lib/fifa";
-import { fetchSwedishBroadcasts, runPipeline } from "@/lib/fifa";
+import {
+  fetchSwedishBroadcasts,
+  GROUP_STAGE_ROUNDS,
+  getGroupGameNumbers,
+  runPipeline,
+} from "@/lib/fifa";
 
 function groupByDate(matches: MatchInfo[]): Map<string, MatchInfo[]> {
   const groups = new Map<string, MatchInfo[]>();
@@ -72,6 +77,7 @@ export default async function UpcomingGamesPage() {
     runPipeline(),
     fetchSwedishBroadcasts(),
   ]);
+  const groupGame = getGroupGameNumbers(matches);
   const upcoming = matches.filter((m) => !m.finished);
 
   if (upcoming.length === 0) {
@@ -160,10 +166,12 @@ export default async function UpcomingGamesPage() {
                       </div>
                     </div>
 
-                    {m.stageName && (
+                    {(groupGame[m.matchId] || m.stageName) && (
                       <div className="mt-2 text-center">
                         <span className="text-[10px] font-medium uppercase tracking-widest text-white/30">
-                          {m.stageName}
+                          {groupGame[m.matchId]
+                            ? `Stage 1 · Game ${groupGame[m.matchId]}/${GROUP_STAGE_ROUNDS}`
+                            : m.stageName}
                         </span>
                       </div>
                     )}

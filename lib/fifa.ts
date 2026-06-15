@@ -191,6 +191,48 @@ function isLive(status: number): boolean {
   return status === 3;
 }
 
+// "First Stage" is the group stage (each team plays 3 group games).
+function isGroupStage(m: MatchInfo): boolean {
+  return /first stage|group/i.test(m.stageName ?? "");
+}
+
+/**
+ * For group-stage ("Stage 1") matches, returns matchId -> round number (1..3),
+ * derived from each team's chronological group fixtures. Knockout matches are
+ * omitted.
+ */
+export function getGroupGameNumbers(
+  matches: MatchInfo[],
+): Record<string, number> {
+  const groupMatches = matches.filter(isGroupStage);
+
+  const byTeam = new Map<string, MatchInfo[]>();
+  for (const m of groupMatches) {
+    for (const teamId of [m.homeTeamId, m.awayTeamId]) {
+      if (!teamId) continue;
+      if (!byTeam.has(teamId)) byTeam.set(teamId, []);
+      byTeam.get(teamId)?.push(m);
+    }
+  }
+
+  const indexByTeam = new Map<string, Map<string, number>>();
+  for (const [teamId, list] of byTeam) {
+    list.sort((a, b) => (a.date ?? "").localeCompare(b.date ?? ""));
+    indexByTeam.set(teamId, new Map(list.map((m, i) => [m.matchId, i])));
+  }
+
+  // Use the home team's perspective for a deterministic round number (both
+  // teams in a fixture share the same round).
+  const result: Record<string, number> = {};
+  for (const m of groupMatches) {
+    const idx = indexByTeam.get(m.homeTeamId)?.get(m.matchId);
+    if (idx != null) result[m.matchId] = idx + 1;
+  }
+  return result;
+}
+
+export const GROUP_STAGE_ROUNDS = 3;
+
 // ---------------------------------------------------------------------------
 // Scoring
 // ---------------------------------------------------------------------------
