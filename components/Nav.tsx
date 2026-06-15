@@ -15,6 +15,7 @@ const rest = [
   { href: "/upcoming-games", label: "Upcoming" },
   { href: "/players", label: "Players" },
   { href: "/stats", label: "Stats" },
+  { href: "/clubs", label: "Clubs" },
   { href: "/predictions", label: "AI Picks" },
 ];
 
@@ -87,7 +88,6 @@ export function Nav() {
                 onClick={() => setOpen(false)}
               />
               <div
-                // biome-ignore lint/a11y/useSemanticElements: menu of links
                 role="menu"
                 className="absolute right-0 z-50 mt-2 w-44 rounded-xl border border-white/10 bg-black/90 p-1 shadow-xl backdrop-blur-md"
               >

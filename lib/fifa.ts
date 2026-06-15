@@ -1180,6 +1180,1847 @@ export function getTeamStatLeaders(
 }
 
 // ---------------------------------------------------------------------------
+// Clubs (a fantasy XI per club, built from its World Cup players)
+// ---------------------------------------------------------------------------
+
+interface ClubPlayerSpec {
+  ids: string[];
+  name: string;
+  countryCode: string;
+  position: Position; // FIFA official position
+  // Keep in the roster but never pick into the XI (e.g. a player on loan whose
+  // points are credited to another club instead).
+  benchOnly?: boolean;
+}
+
+interface ClubSpec {
+  name: string;
+  country: string; // FIFA code of the club's home nation (for its flag)
+  players: ClubPlayerSpec[];
+}
+
+export interface ClubLineupPlayer {
+  name: string;
+  countryCode: string;
+  position: Position;
+  points: number;
+  matchesPlayed: number;
+}
+
+export interface ClubTeam {
+  name: string;
+  country: string;
+  totalPoints: number;
+  filledCount: number;
+  lineup: Record<Position, (ClubLineupPlayer | null)[]>;
+  bench: ClubLineupPlayer[]; // roster players not picked into the XI
+}
+
+const CLUB_FORMATION: Record<Position, number> = {
+  GK: 1,
+  DEF: 3,
+  MID: 4,
+  ATT: 3,
+};
+const CLUB_POSITIONS: Position[] = ["GK", "DEF", "MID", "ATT"];
+
+const CLUBS: ClubSpec[] = [
+  {
+    name: "Liverpool FC",
+    country: "ENG",
+    players: [
+      { ids: ["308370"], name: "Alisson", countryCode: "BRA", position: "GK" },
+      {
+        ids: ["419166"],
+        name: "Ibrahima Konaté",
+        countryCode: "FRA",
+        position: "DEF",
+      },
+      {
+        ids: ["397786"],
+        name: "Virgil van Dijk",
+        countryCode: "NED",
+        position: "DEF",
+      },
+      {
+        ids: ["401339"],
+        name: "Andy Robertson",
+        countryCode: "SCO",
+        position: "DEF",
+      },
+      {
+        ids: ["430628"],
+        name: "Alexis Mac Allister",
+        countryCode: "ARG",
+        position: "MID",
+      },
+      {
+        ids: ["430669"],
+        name: "Florian Wirtz",
+        countryCode: "GER",
+        position: "MID",
+      },
+      {
+        ids: ["395318"],
+        name: "Wataru Endo",
+        countryCode: "JPN",
+        position: "MID",
+      },
+      {
+        ids: ["430176"],
+        name: "Ryan Gravenberch",
+        countryCode: "NED",
+        position: "MID",
+      },
+      {
+        ids: ["344654"],
+        name: "Mohamed Salah",
+        countryCode: "EGY",
+        position: "ATT",
+      },
+      {
+        ids: ["448152"],
+        name: "Cody Gakpo",
+        countryCode: "NED",
+        position: "ATT",
+      },
+      {
+        ids: ["430150"],
+        name: "Alexander Isak",
+        countryCode: "SWE",
+        position: "ATT",
+      },
+    ],
+  },
+  {
+    name: "Manchester City",
+    country: "ENG",
+    players: [
+      {
+        ids: ["485080"],
+        name: "James Trafford",
+        countryCode: "ENG",
+        position: "GK",
+      },
+      {
+        ids: ["431858"],
+        name: "Rayan Aït-Nouri",
+        countryCode: "ALG",
+        position: "DEF",
+      },
+      {
+        ids: ["448180"],
+        name: "Joško Gvardiol",
+        countryCode: "CRO",
+        position: "DEF",
+      },
+      {
+        ids: ["463780"],
+        name: "Nico O'Reilly",
+        countryCode: "ENG",
+        position: "DEF",
+      },
+      {
+        ids: ["369434"],
+        name: "John Stones",
+        countryCode: "ENG",
+        position: "DEF",
+      },
+      {
+        ids: ["405841"],
+        name: "Marc Guéhi",
+        countryCode: "ENG",
+        position: "DEF",
+      },
+      {
+        ids: ["336088"],
+        name: "Nathan Aké",
+        countryCode: "NED",
+        position: "DEF",
+      },
+      {
+        ids: ["384752"],
+        name: "Rúben Dias",
+        countryCode: "POR",
+        position: "DEF",
+      },
+      {
+        ids: ["464924"],
+        name: "Abdukodir Khusanov",
+        countryCode: "UZB",
+        position: "DEF",
+      },
+      {
+        ids: ["339987"],
+        name: "Mateo Kovačić",
+        countryCode: "CRO",
+        position: "MID",
+      },
+      {
+        ids: ["431861"],
+        name: "Rayan Cherki",
+        countryCode: "FRA",
+        position: "MID",
+      },
+      {
+        ids: ["448531"],
+        name: "Antoine Semenyo",
+        countryCode: "GHA",
+        position: "MID",
+      },
+      {
+        ids: ["483526"],
+        name: "Tijjani Reijnders",
+        countryCode: "NED",
+        position: "MID",
+      },
+      {
+        ids: ["395205"],
+        name: "Bernardo Silva",
+        countryCode: "POR",
+        position: "MID",
+      },
+      {
+        ids: ["441148"],
+        name: "Matheus Nunes",
+        countryCode: "POR",
+        position: "MID",
+      },
+      { ids: ["411375"], name: "Rodri", countryCode: "ESP", position: "MID" },
+      {
+        ids: ["448341"],
+        name: "Jérémy Doku",
+        countryCode: "BEL",
+        position: "ATT",
+      },
+      {
+        ids: ["430476"],
+        name: "Omar Marmoush",
+        countryCode: "EGY",
+        position: "ATT",
+      },
+      {
+        ids: ["419652"],
+        name: "Erling Haaland",
+        countryCode: "NOR",
+        position: "ATT",
+      },
+    ],
+  },
+  {
+    name: "Bayern Munich",
+    country: "GER",
+    players: [
+      {
+        ids: ["228912"],
+        name: "Manuel Neuer",
+        countryCode: "GER",
+        position: "GK",
+      },
+      {
+        ids: ["412144"],
+        name: "Alphonso Davies",
+        countryCode: "CAN",
+        position: "DEF",
+      },
+      {
+        ids: ["433667"],
+        name: "Josip Stanišić",
+        countryCode: "CRO",
+        position: "DEF",
+      },
+      {
+        ids: ["389876"],
+        name: "Dayot Upamecano",
+        countryCode: "FRA",
+        position: "DEF",
+      },
+      {
+        ids: ["401378"],
+        name: "Jonathan Tah",
+        countryCode: "GER",
+        position: "DEF",
+      },
+      {
+        ids: ["386413"],
+        name: "Joshua Kimmich",
+        countryCode: "GER",
+        position: "DEF",
+      },
+      {
+        ids: ["403274"],
+        name: "Hiroki Ito",
+        countryCode: "JPN",
+        position: "DEF",
+      },
+      {
+        ids: ["395088"],
+        name: "Kim Min-jae",
+        countryCode: "KOR",
+        position: "DEF",
+      },
+      {
+        ids: ["385259"],
+        name: "Konrad Laimer",
+        countryCode: "AUT",
+        position: "MID",
+      },
+      {
+        ids: ["484849"],
+        name: "Aleksandar Pavlović",
+        countryCode: "GER",
+        position: "MID",
+      },
+      {
+        ids: ["379953"],
+        name: "Leon Goretzka",
+        countryCode: "GER",
+        position: "MID",
+      },
+      {
+        ids: ["429642"],
+        name: "Jamal Musiala",
+        countryCode: "GER",
+        position: "MID",
+      },
+      {
+        ids: ["523354"],
+        name: "Bara Sapoko Ndiaye",
+        countryCode: "SEN",
+        position: "MID",
+      },
+      {
+        ids: ["428886"],
+        name: "Luis Díaz",
+        countryCode: "COL",
+        position: "ATT",
+      },
+      {
+        ids: ["369419"],
+        name: "Harry Kane",
+        countryCode: "ENG",
+        position: "ATT",
+      },
+      {
+        ids: ["485655"],
+        name: "Michael Olise",
+        countryCode: "FRA",
+        position: "ATT",
+      },
+      {
+        ids: ["418795"],
+        name: "Nicolas Jackson",
+        countryCode: "SEN",
+        position: "ATT",
+      },
+    ],
+  },
+  {
+    name: "Arsenal",
+    country: "ENG",
+    players: [
+      {
+        ids: ["447853"],
+        name: "David Raya",
+        countryCode: "ESP",
+        position: "GK",
+      },
+      {
+        ids: ["430601"],
+        name: "Gabriel Magalhães",
+        countryCode: "BRA",
+        position: "DEF",
+      },
+      {
+        ids: ["424031"],
+        name: "Piero Hincapié",
+        countryCode: "ECU",
+        position: "DEF",
+      },
+      {
+        ids: ["419177"],
+        name: "William Saliba",
+        countryCode: "FRA",
+        position: "DEF",
+      },
+      {
+        ids: ["448158"],
+        name: "Jurriën Timber",
+        countryCode: "NED",
+        position: "DEF",
+      },
+      {
+        ids: ["433097"],
+        name: "Declan Rice",
+        countryCode: "ENG",
+        position: "MID",
+      },
+      {
+        ids: ["473113"],
+        name: "Eberechi Eze",
+        countryCode: "ENG",
+        position: "MID",
+      },
+      {
+        ids: ["400716"],
+        name: "Martin Ødegaard",
+        countryCode: "NOR",
+        position: "MID",
+      },
+      {
+        ids: ["430733"],
+        name: "Mikel Merino",
+        countryCode: "ESP",
+        position: "MID",
+      },
+      {
+        ids: ["430754"],
+        name: "Martin Zubimendi",
+        countryCode: "ESP",
+        position: "MID",
+      },
+      {
+        ids: ["448355"],
+        name: "Leandro Trossard",
+        countryCode: "BEL",
+        position: "ATT",
+      },
+      {
+        ids: ["430597"],
+        name: "Gabriel Martinelli",
+        countryCode: "BRA",
+        position: "ATT",
+      },
+      {
+        ids: ["448196"],
+        name: "Bukayo Saka",
+        countryCode: "ENG",
+        position: "ATT",
+      },
+      {
+        ids: ["489732"],
+        name: "Noni Madueke",
+        countryCode: "ENG",
+        position: "ATT",
+      },
+      {
+        ids: ["411367"],
+        name: "Kai Havertz",
+        countryCode: "GER",
+        position: "ATT",
+      },
+      {
+        ids: ["483327"],
+        name: "Viktor Gyökeres",
+        countryCode: "SWE",
+        position: "ATT",
+      },
+    ],
+  },
+  {
+    name: "Paris Saint-Germain",
+    country: "FRA",
+    players: [
+      // No World Cup goalkeeper in the squad — GK slot stays empty.
+      {
+        ids: ["332946"],
+        name: "Marquinhos",
+        countryCode: "BRA",
+        position: "DEF",
+      },
+      {
+        ids: ["448290"],
+        name: "Willian Pacho",
+        countryCode: "ECU",
+        position: "DEF",
+      },
+      {
+        ids: ["411470"],
+        name: "Lucas Hernández",
+        countryCode: "FRA",
+        position: "DEF",
+      },
+      {
+        ids: ["400721"],
+        name: "Achraf Hakimi",
+        countryCode: "MAR",
+        position: "DEF",
+      },
+      {
+        ids: ["433195"],
+        name: "Nuno Mendes",
+        countryCode: "POR",
+        position: "DEF",
+      },
+      {
+        ids: ["483549"],
+        name: "Warren Zaïre-Emery",
+        countryCode: "FRA",
+        position: "MID",
+      },
+      {
+        ids: ["418490"],
+        name: "Lee Kang-in",
+        countryCode: "KOR",
+        position: "MID",
+      },
+      { ids: ["441149"], name: "Vitinha", countryCode: "POR", position: "MID" },
+      {
+        ids: ["484141"],
+        name: "João Neves",
+        countryCode: "POR",
+        position: "MID",
+      },
+      {
+        ids: ["430718"],
+        name: "Fabián Ruiz",
+        countryCode: "ESP",
+        position: "MID",
+      },
+      {
+        ids: ["512039"],
+        name: "Khalil Ayari",
+        countryCode: "TUN",
+        position: "MID",
+      },
+      {
+        ids: ["398680"],
+        name: "Ousmane Dembélé",
+        countryCode: "FRA",
+        position: "ATT",
+      },
+      {
+        ids: ["484860"],
+        name: "Bradley Barcola",
+        countryCode: "FRA",
+        position: "ATT",
+      },
+      {
+        ids: ["464114"],
+        name: "Désiré Doué",
+        countryCode: "FRA",
+        position: "ATT",
+      },
+      {
+        ids: ["448081"],
+        name: "Gonçalo Ramos",
+        countryCode: "POR",
+        position: "ATT",
+      },
+      {
+        ids: ["496358"],
+        name: "Ibrahim Mbaye",
+        countryCode: "SEN",
+        position: "ATT",
+      },
+    ],
+  },
+  {
+    name: "Barcelona FC",
+    country: "ESP",
+    players: [
+      {
+        ids: ["484691"],
+        name: "Joan García",
+        countryCode: "ESP",
+        position: "GK",
+      },
+      {
+        ids: ["430707"],
+        name: "Jules Koundé",
+        countryCode: "FRA",
+        position: "DEF",
+      },
+      {
+        ids: ["368649"],
+        name: "João Cancelo",
+        countryCode: "POR",
+        position: "DEF",
+      },
+      {
+        ids: ["405562"],
+        name: "Eric García",
+        countryCode: "ESP",
+        position: "DEF",
+      },
+      {
+        ids: ["474973"],
+        name: "Pau Cubarsí",
+        countryCode: "ESP",
+        position: "DEF",
+      },
+      {
+        ids: ["419101"],
+        name: "Ronald Araújo",
+        countryCode: "URU",
+        position: "DEF",
+      },
+      {
+        ids: ["422657"],
+        name: "Frenkie de Jong",
+        countryCode: "NED",
+        position: "MID",
+      },
+      { ids: ["447866"], name: "Gavi", countryCode: "ESP", position: "MID" },
+      { ids: ["423646"], name: "Pedri", countryCode: "ESP", position: "MID" },
+      {
+        ids: ["433872"],
+        name: "Raphinha",
+        countryCode: "BRA",
+        position: "ATT",
+      },
+      {
+        ids: ["495488"],
+        name: "Hamza Abdelkarim",
+        countryCode: "EGY",
+        position: "ATT",
+      },
+      // On loan from Man United; his points are credited to United's XI.
+      {
+        ids: ["401470"],
+        name: "Marcus Rashford",
+        countryCode: "ENG",
+        position: "ATT",
+        benchOnly: true,
+      },
+      {
+        ids: ["405545"],
+        name: "Ferran Torres",
+        countryCode: "ESP",
+        position: "ATT",
+      },
+      {
+        ids: ["430750"],
+        name: "Dani Olmo",
+        countryCode: "ESP",
+        position: "ATT",
+      },
+      {
+        ids: ["484320"],
+        name: "Lamine Yamal",
+        countryCode: "ESP",
+        position: "ATT",
+      },
+    ],
+  },
+  {
+    name: "Al Hilal",
+    country: "KSA",
+    players: [
+      {
+        ids: ["356956"],
+        name: "Yassine Bounou",
+        countryCode: "MAR",
+        position: "GK",
+      },
+      {
+        ids: ["408042"],
+        name: "Theo Hernández",
+        countryCode: "FRA",
+        position: "DEF",
+      },
+      {
+        ids: ["433439"],
+        name: "Ali Lajami",
+        countryCode: "KSA",
+        position: "DEF",
+      },
+      {
+        ids: ["403335"],
+        name: "Hassan Al-Tambakti",
+        countryCode: "KSA",
+        position: "DEF",
+      },
+      {
+        ids: ["419303"],
+        name: "Moteb Al-Harbi",
+        countryCode: "KSA",
+        position: "DEF",
+      },
+      {
+        ids: ["339820"],
+        name: "Kalidou Koulibaly",
+        countryCode: "SEN",
+        position: "DEF",
+      },
+      {
+        ids: ["395216"],
+        name: "Rúben Neves",
+        countryCode: "POR",
+        position: "MID",
+      },
+      {
+        ids: ["403319"],
+        name: "Nasser Al-Dawsari",
+        countryCode: "KSA",
+        position: "MID",
+      },
+      {
+        ids: ["407993"],
+        name: "Mohamed Kanno",
+        countryCode: "KSA",
+        position: "MID",
+      },
+      {
+        ids: ["339745"],
+        name: "Salem Al-Dawsari",
+        countryCode: "KSA",
+        position: "ATT",
+      },
+      {
+        ids: ["494800"],
+        name: "Sultan Mandash",
+        countryCode: "KSA",
+        position: "ATT",
+      },
+      {
+        ids: ["419126"],
+        name: "Darwin Núñez",
+        countryCode: "URU",
+        position: "ATT",
+      },
+    ],
+  },
+  {
+    name: "Atlético Madrid",
+    country: "ESP",
+    players: [
+      {
+        ids: ["430624"],
+        name: "Juan Musso",
+        countryCode: "ARG",
+        position: "GK",
+      },
+      {
+        ids: ["402925"],
+        name: "Nahuel Molina",
+        countryCode: "ARG",
+        position: "DEF",
+      },
+      {
+        ids: ["484728"],
+        name: "Marc Pubill",
+        countryCode: "ESP",
+        position: "DEF",
+      },
+      {
+        ids: ["382739"],
+        name: "Marcos Llorente",
+        countryCode: "ESP",
+        position: "DEF",
+      },
+      {
+        ids: ["368655"],
+        name: "José María Giménez",
+        countryCode: "URU",
+        position: "DEF",
+      },
+      {
+        ids: ["461177"],
+        name: "Obed Vargas",
+        countryCode: "MEX",
+        position: "MID",
+      },
+      {
+        ids: ["447860"],
+        name: "Álex Baena",
+        countryCode: "ESP",
+        position: "MID",
+      },
+      {
+        ids: ["430631"],
+        name: "Nico González",
+        countryCode: "ARG",
+        position: "MID",
+      },
+      {
+        ids: ["416081"],
+        name: "Julián Álvarez",
+        countryCode: "ARG",
+        position: "ATT",
+      },
+      {
+        ids: ["418975"],
+        name: "Thiago Almada",
+        countryCode: "ARG",
+        position: "ATT",
+      },
+      {
+        ids: ["485595"],
+        name: "Giuliano Simeone",
+        countryCode: "ARG",
+        position: "ATT",
+      },
+      {
+        ids: ["398588"],
+        name: "Alexander Sørloth",
+        countryCode: "NOR",
+        position: "ATT",
+      },
+    ],
+  },
+  {
+    name: "Crystal Palace",
+    country: "ENG",
+    players: [
+      {
+        ids: ["403046"],
+        name: "Dean Henderson",
+        countryCode: "ENG",
+        position: "GK",
+      },
+      {
+        ids: ["431200"],
+        name: "Daniel Muñoz",
+        countryCode: "COL",
+        position: "DEF",
+      },
+      {
+        ids: ["405881"],
+        name: "Maxence Lacroix",
+        countryCode: "FRA",
+        position: "DEF",
+      },
+      {
+        ids: ["448607"],
+        name: "Chadi Riad",
+        countryCode: "MAR",
+        position: "DEF",
+      },
+      {
+        ids: ["419062"],
+        name: "Chris Richards",
+        countryCode: "USA",
+        position: "DEF",
+      },
+      {
+        ids: ["395550"],
+        name: "Jefferson Lerma",
+        countryCode: "COL",
+        position: "MID",
+      },
+      {
+        ids: ["448557"],
+        name: "Daichi Kamada",
+        countryCode: "JPN",
+        position: "MID",
+      },
+      {
+        ids: ["485675"],
+        name: "Evann Guessand",
+        countryCode: "CIV",
+        position: "ATT",
+      },
+      {
+        ids: ["403094"],
+        name: "Jean-Philippe Mateta",
+        countryCode: "FRA",
+        position: "ATT",
+      },
+      {
+        ids: ["419662"],
+        name: "Jørgen Strand Larsen",
+        countryCode: "NOR",
+        position: "ATT",
+      },
+      {
+        ids: ["401889"],
+        name: "Ismaïla Sarr",
+        countryCode: "SEN",
+        position: "ATT",
+      },
+      {
+        ids: ["423658"],
+        name: "Yéremy Pino",
+        countryCode: "ESP",
+        position: "ATT",
+      },
+    ],
+  },
+  {
+    name: "Manchester United",
+    country: "ENG",
+    players: [
+      {
+        ids: ["495348"],
+        name: "Senne Lammens",
+        countryCode: "BEL",
+        position: "GK",
+      },
+      {
+        ids: ["441180"],
+        name: "Altay Bayındır",
+        countryCode: "TUR",
+        position: "GK",
+      },
+      {
+        ids: ["402921"],
+        name: "Lisandro Martínez",
+        countryCode: "ARG",
+        position: "DEF",
+      },
+      {
+        ids: ["411680"],
+        name: "Noussair Mazraoui",
+        countryCode: "MAR",
+        position: "DEF",
+      },
+      {
+        ids: ["403002"],
+        name: "Diogo Dalot",
+        countryCode: "POR",
+        position: "DEF",
+      },
+      {
+        ids: ["482621"],
+        name: "Kobbie Mainoo",
+        countryCode: "ENG",
+        position: "MID",
+      },
+      {
+        ids: ["395206"],
+        name: "Bruno Fernandes",
+        countryCode: "POR",
+        position: "MID",
+      },
+      {
+        ids: ["523007"],
+        name: "Tyler Fletcher",
+        countryCode: "SCO",
+        position: "MID",
+      },
+      {
+        ids: ["441623"],
+        name: "Manuel Ugarte",
+        countryCode: "URU",
+        position: "MID",
+      },
+      {
+        ids: ["430609"],
+        name: "Matheus Cunha",
+        countryCode: "BRA",
+        position: "ATT",
+      },
+      {
+        ids: ["430822"],
+        name: "Amad Diallo",
+        countryCode: "CIV",
+        position: "ATT",
+      },
+      {
+        ids: ["401470"],
+        name: "Marcus Rashford",
+        countryCode: "ENG",
+        position: "ATT",
+      },
+    ],
+  },
+  {
+    name: "Borussia Dortmund",
+    country: "GER",
+    players: [
+      {
+        ids: ["448107"],
+        name: "Gregor Kobel",
+        countryCode: "SUI",
+        position: "GK",
+      },
+      {
+        ids: ["395113"],
+        name: "Ramy Bensebaïni",
+        countryCode: "ALG",
+        position: "DEF",
+      },
+      {
+        ids: ["430658"],
+        name: "Waldemar Anton",
+        countryCode: "GER",
+        position: "DEF",
+      },
+      {
+        ids: ["430667"],
+        name: "Nico Schlotterbeck",
+        countryCode: "GER",
+        position: "DEF",
+      },
+      {
+        ids: ["491255"],
+        name: "Daniel Svensson",
+        countryCode: "SWE",
+        position: "DEF",
+      },
+      {
+        ids: ["358241"],
+        name: "Marcel Sabitzer",
+        countryCode: "AUT",
+        position: "MID",
+      },
+      {
+        ids: ["463800"],
+        name: "Carney Chukwuemeka",
+        countryCode: "AUT",
+        position: "MID",
+      },
+      {
+        ids: ["492363"],
+        name: "Felix Nmecha",
+        countryCode: "GER",
+        position: "MID",
+      },
+      {
+        ids: ["389907"],
+        name: "Salih Özcan",
+        countryCode: "TUR",
+        position: "MID",
+      },
+      {
+        ids: ["484850"],
+        name: "Maximilian Beier",
+        countryCode: "GER",
+        position: "ATT",
+      },
+      {
+        ids: ["483496"],
+        name: "Julian Ryerson",
+        countryCode: "NOR",
+        position: "ATT",
+      },
+    ],
+  },
+  {
+    name: "Galatasaray",
+    country: "TUR",
+    players: [
+      {
+        ids: ["441181"],
+        name: "Uğurcan Çakır",
+        countryCode: "TUR",
+        position: "GK",
+      },
+      {
+        ids: ["386013"],
+        name: "Davinson Sánchez",
+        countryCode: "COL",
+        position: "DEF",
+      },
+      {
+        ids: ["430854"],
+        name: "Wilfried Singo",
+        countryCode: "CIV",
+        position: "DEF",
+      },
+      {
+        ids: ["430671"],
+        name: "Ismaïl Jakobs",
+        countryCode: "SEN",
+        position: "DEF",
+      },
+      {
+        ids: ["484065"],
+        name: "Eren Elmalı",
+        countryCode: "TUR",
+        position: "DEF",
+      },
+      {
+        ids: ["484082"],
+        name: "Abdülkerim Bardakcı",
+        countryCode: "TUR",
+        position: "DEF",
+      },
+      {
+        ids: ["404353"],
+        name: "Leroy Sané",
+        countryCode: "GER",
+        position: "MID",
+      },
+      {
+        ids: ["336170"],
+        name: "Kaan Ayhan",
+        countryCode: "TUR",
+        position: "MID",
+      },
+      {
+        ids: ["448153"],
+        name: "Noa Lang",
+        countryCode: "NED",
+        position: "ATT",
+      },
+      {
+        ids: ["406231"],
+        name: "Yunus Akgün",
+        countryCode: "TUR",
+        position: "ATT",
+      },
+      {
+        ids: ["484139"],
+        name: "Barış Alper Yılmaz",
+        countryCode: "TUR",
+        position: "ATT",
+      },
+    ],
+  },
+  {
+    name: "AC Milan",
+    country: "ITA",
+    players: [
+      {
+        ids: ["448332"],
+        name: "Mike Maignan",
+        countryCode: "FRA",
+        position: "GK",
+      },
+      {
+        ids: ["448366"],
+        name: "Koni De Winter",
+        countryCode: "BEL",
+        position: "DEF",
+      },
+      {
+        ids: ["389782"],
+        name: "Pervis Estupiñán",
+        countryCode: "ECU",
+        position: "DEF",
+      },
+      {
+        ids: ["402047"],
+        name: "Adrien Rabiot",
+        countryCode: "FRA",
+        position: "MID",
+      },
+      {
+        ids: ["433092"],
+        name: "Alexis Saelemaekers",
+        countryCode: "BEL",
+        position: "MID",
+      },
+      {
+        ids: ["241559"],
+        name: "Luka Modrić",
+        countryCode: "CRO",
+        position: "MID",
+      },
+      {
+        ids: ["448120"],
+        name: "Ardon Jashari",
+        countryCode: "SUI",
+        position: "MID",
+      },
+      {
+        ids: ["430759"],
+        name: "Santiago Giménez",
+        countryCode: "MEX",
+        position: "ATT",
+      },
+      {
+        ids: ["418550"],
+        name: "Rafael Leão",
+        countryCode: "POR",
+        position: "ATT",
+      },
+      {
+        ids: ["390267"],
+        name: "Christian Pulisic",
+        countryCode: "USA",
+        position: "ATT",
+      },
+    ],
+  },
+  {
+    name: "Fenerbahçe",
+    country: "TUR",
+    players: [
+      { ids: ["395427"], name: "Ederson", countryCode: "BRA", position: "GK" },
+      {
+        ids: ["360498"],
+        name: "Mert Günok",
+        countryCode: "TUR",
+        position: "GK",
+      },
+      {
+        ids: ["401167"],
+        name: "Çağlar Söyüncü",
+        countryCode: "TUR",
+        position: "DEF",
+      },
+      {
+        ids: ["395212"],
+        name: "Nélson Semedo",
+        countryCode: "POR",
+        position: "DEF",
+      },
+      {
+        ids: ["430120"],
+        name: "Mert Müldür",
+        countryCode: "TUR",
+        position: "DEF",
+      },
+      {
+        ids: ["400634"],
+        name: "Edson Álvarez",
+        countryCode: "MEX",
+        position: "DEF",
+      },
+      {
+        ids: ["398681"],
+        name: "N'Golo Kanté",
+        countryCode: "FRA",
+        position: "MID",
+      },
+      {
+        ids: ["484092"],
+        name: "İsmail Yüksek",
+        countryCode: "TUR",
+        position: "MID",
+      },
+      {
+        ids: ["441188"],
+        name: "Kerem Aktürkoğlu",
+        countryCode: "TUR",
+        position: "ATT",
+      },
+      {
+        ids: ["486076"],
+        name: "Oğuz Aydın",
+        countryCode: "TUR",
+        position: "ATT",
+      },
+    ],
+  },
+  {
+    name: "PSV Eindhoven",
+    country: "NED",
+    players: [
+      {
+        ids: ["484012"],
+        name: "Matěj Kovář",
+        countryCode: "CZE",
+        position: "GK",
+      },
+      {
+        ids: ["511141"],
+        name: "Armando Obispo",
+        countryCode: "CUW",
+        position: "DEF",
+      },
+      {
+        ids: ["424071"],
+        name: "Anass Salah Eddine",
+        countryCode: "MAR",
+        position: "DEF",
+      },
+      {
+        ids: ["406280"],
+        name: "Sergiño Dest",
+        countryCode: "USA",
+        position: "DEF",
+      },
+      {
+        ids: ["520036"],
+        name: "Paul Wanner",
+        countryCode: "AUT",
+        position: "MID",
+      },
+      {
+        ids: ["448598"],
+        name: "Ismael Saibari",
+        countryCode: "MAR",
+        position: "MID",
+      },
+      {
+        ids: ["448157"],
+        name: "Guus Til",
+        countryCode: "NED",
+        position: "MID",
+      },
+      {
+        ids: ["359381"],
+        name: "Ivan Perišić",
+        countryCode: "CRO",
+        position: "ATT",
+      },
+      {
+        ids: ["464566"],
+        name: "Esmir Bajraktarević",
+        countryCode: "BIH",
+        position: "ATT",
+      },
+      {
+        ids: ["419082"],
+        name: "Ricardo Pepi",
+        countryCode: "USA",
+        position: "ATT",
+      },
+    ],
+  },
+  {
+    name: "Real Madrid",
+    country: "ESP",
+    players: [
+      {
+        ids: ["358106"],
+        name: "Thibaut Courtois",
+        countryCode: "BEL",
+        position: "GK",
+      },
+      {
+        ids: ["316002"],
+        name: "David Alaba",
+        countryCode: "AUT",
+        position: "DEF",
+      },
+      {
+        ids: ["379955"],
+        name: "Antonio Rüdiger",
+        countryCode: "GER",
+        position: "DEF",
+      },
+      {
+        ids: ["448202"],
+        name: "Jude Bellingham",
+        countryCode: "ENG",
+        position: "MID",
+      },
+      {
+        ids: ["405893"],
+        name: "Aurélien Tchouaméni",
+        countryCode: "FRA",
+        position: "MID",
+      },
+      {
+        ids: ["402884"],
+        name: "Federico Valverde",
+        countryCode: "URU",
+        position: "MID",
+      },
+      {
+        ids: ["405742"],
+        name: "Vinícius Júnior",
+        countryCode: "BRA",
+        position: "ATT",
+      },
+      {
+        ids: ["389867"],
+        name: "Kylian Mbappé",
+        countryCode: "FRA",
+        position: "ATT",
+      },
+      {
+        ids: ["430740"],
+        name: "Brahim Díaz",
+        countryCode: "MAR",
+        position: "ATT",
+      },
+      {
+        ids: ["484087"],
+        name: "Arda Güler",
+        countryCode: "TUR",
+        position: "ATT",
+      },
+    ],
+  },
+  {
+    name: "Slavia Prague",
+    country: "CZE",
+    players: [
+      {
+        ids: ["441162"],
+        name: "Jindřich Staněk",
+        countryCode: "CZE",
+        position: "GK",
+      },
+      {
+        ids: ["433755"],
+        name: "David Zima",
+        countryCode: "CZE",
+        position: "DEF",
+      },
+      {
+        ids: ["514334"],
+        name: "Štěpán Chaloupek",
+        countryCode: "CZE",
+        position: "DEF",
+      },
+      {
+        ids: ["483990"],
+        name: "David Jurásek",
+        countryCode: "CZE",
+        position: "DEF",
+      },
+      {
+        ids: ["483936"],
+        name: "David Doudera",
+        countryCode: "CZE",
+        position: "DEF",
+      },
+      {
+        ids: ["441167"],
+        name: "Tomáš Holeš",
+        countryCode: "CZE",
+        position: "DEF",
+      },
+      {
+        ids: ["484011"],
+        name: "Lukáš Provod",
+        countryCode: "CZE",
+        position: "MID",
+      },
+      {
+        ids: ["433668"],
+        name: "Michal Sadílek",
+        countryCode: "CZE",
+        position: "MID",
+      },
+      {
+        ids: ["484003"],
+        name: "Mojmír Chytil",
+        countryCode: "CZE",
+        position: "ATT",
+      },
+      {
+        ids: ["483961"],
+        name: "Tomáš Chorý",
+        countryCode: "CZE",
+        position: "ATT",
+      },
+    ],
+  },
+  {
+    name: "Al Ahly",
+    country: "EGY",
+    players: [
+      {
+        ids: ["408948"],
+        name: "Mohamed El Shenawy",
+        countryCode: "EGY",
+        position: "GK",
+      },
+      {
+        ids: ["416906"],
+        name: "Mostafa Shobeir",
+        countryCode: "EGY",
+        position: "GK",
+      },
+      {
+        ids: ["369267"],
+        name: "Yasser Ibrahim",
+        countryCode: "EGY",
+        position: "DEF",
+      },
+      {
+        ids: ["408950"],
+        name: "Mohamed Hany",
+        countryCode: "EGY",
+        position: "DEF",
+      },
+      {
+        ids: ["494742"],
+        name: "Youssef Belammari",
+        countryCode: "MAR",
+        position: "DEF",
+      },
+      {
+        ids: ["430482"],
+        name: "Emam Ashour",
+        countryCode: "EGY",
+        position: "MID",
+      },
+      {
+        ids: ["461788"],
+        name: "Marwan Attia",
+        countryCode: "EGY",
+        position: "MID",
+      },
+      {
+        ids: ["363863"],
+        name: "Trezeguet",
+        countryCode: "EGY",
+        position: "ATT",
+      },
+      { ids: ["433461"], name: "Zizo", countryCode: "EGY", position: "ATT" },
+    ],
+  },
+  {
+    name: "Al Ahli",
+    country: "KSA",
+    players: [
+      {
+        ids: ["433806"],
+        name: "Édouard Mendy",
+        countryCode: "SEN",
+        position: "GK",
+      },
+      {
+        ids: ["430594"],
+        name: "Roger Ibañez",
+        countryCode: "BRA",
+        position: "DEF",
+      },
+      {
+        ids: ["441179"],
+        name: "Merih Demiral",
+        countryCode: "TUR",
+        position: "DEF",
+      },
+      {
+        ids: ["419326"],
+        name: "Ali Majrashi",
+        countryCode: "KSA",
+        position: "DEF",
+      },
+      {
+        ids: ["371609"],
+        name: "Franck Kessié",
+        countryCode: "CIV",
+        position: "MID",
+      },
+      {
+        ids: ["436538"],
+        name: "Ziyad Al-Johani",
+        countryCode: "KSA",
+        position: "MID",
+      },
+      {
+        ids: ["379942"],
+        name: "Riyad Mahrez",
+        countryCode: "ALG",
+        position: "ATT",
+      },
+      {
+        ids: ["448198"],
+        name: "Ivan Toney",
+        countryCode: "ENG",
+        position: "ATT",
+      },
+      {
+        ids: ["419291"],
+        name: "Feras Al-Brikan",
+        countryCode: "KSA",
+        position: "ATT",
+      },
+    ],
+  },
+  {
+    name: "Al Nassr",
+    country: "KSA",
+    players: [
+      {
+        ids: ["419287"],
+        name: "Nawaf Al-Aqidi",
+        countryCode: "KSA",
+        position: "GK",
+      },
+      {
+        ids: ["403312"],
+        name: "Abdulelah Al-Amri",
+        countryCode: "KSA",
+        position: "DEF",
+      },
+      {
+        ids: ["430518"],
+        name: "Nawaf Boushal",
+        countryCode: "KSA",
+        position: "DEF",
+      },
+      {
+        ids: ["411624"],
+        name: "Abdullah Al-Khaibari",
+        countryCode: "KSA",
+        position: "MID",
+      },
+      {
+        ids: ["201200"],
+        name: "Cristiano Ronaldo",
+        countryCode: "POR",
+        position: "ATT",
+      },
+      {
+        ids: ["418535"],
+        name: "João Félix",
+        countryCode: "POR",
+        position: "ATT",
+      },
+      {
+        ids: ["430512"],
+        name: "Ayman Yahya",
+        countryCode: "KSA",
+        position: "ATT",
+      },
+      {
+        ids: ["419302"],
+        name: "Abdullah Al-Hamdan",
+        countryCode: "KSA",
+        position: "ATT",
+      },
+      {
+        ids: ["353790"],
+        name: "Sadio Mané",
+        countryCode: "SEN",
+        position: "ATT",
+      },
+    ],
+  },
+  {
+    name: "Aston Villa",
+    country: "ENG",
+    players: [
+      {
+        ids: ["308300"],
+        name: "Emiliano Martínez",
+        countryCode: "ARG",
+        position: "GK",
+      },
+      {
+        ids: ["403049"],
+        name: "Ezri Konsa",
+        countryCode: "ENG",
+        position: "DEF",
+      },
+      {
+        ids: ["368860"],
+        name: "Lucas Digne",
+        countryCode: "FRA",
+        position: "DEF",
+      },
+      {
+        ids: ["395283"],
+        name: "Victor Lindelöf",
+        countryCode: "SWE",
+        position: "DEF",
+      },
+      {
+        ids: ["401444"],
+        name: "Youri Tielemans",
+        countryCode: "BEL",
+        position: "MID",
+      },
+      {
+        ids: ["448364"],
+        name: "Amadou Onana",
+        countryCode: "BEL",
+        position: "MID",
+      },
+      {
+        ids: ["492716"],
+        name: "Morgan Rogers",
+        countryCode: "ENG",
+        position: "MID",
+      },
+      {
+        ids: ["401334"],
+        name: "John McGinn",
+        countryCode: "SCO",
+        position: "MID",
+      },
+      {
+        ids: ["448203"],
+        name: "Ollie Watkins",
+        countryCode: "ENG",
+        position: "ATT",
+      },
+    ],
+  },
+  {
+    name: "Flamengo",
+    country: "BRA",
+    players: [
+      // No World Cup goalkeeper in the squad — GK slot stays empty.
+      {
+        ids: ["335658"],
+        name: "Alex Sandro",
+        countryCode: "BRA",
+        position: "DEF",
+      },
+      { ids: ["335656"], name: "Danilo", countryCode: "BRA", position: "DEF" },
+      {
+        ids: ["371956"],
+        name: "Léo Pereira",
+        countryCode: "BRA",
+        position: "DEF",
+      },
+      {
+        ids: ["368660"],
+        name: "Guillermo Varela",
+        countryCode: "URU",
+        position: "DEF",
+      },
+      {
+        ids: ["411726"],
+        name: "Lucas Paquetá",
+        countryCode: "BRA",
+        position: "MID",
+      },
+      {
+        ids: ["425580"],
+        name: "Jorge Carrascal",
+        countryCode: "COL",
+        position: "MID",
+      },
+      {
+        ids: ["402898"],
+        name: "Nicolás de la Cruz",
+        countryCode: "URU",
+        position: "MID",
+      },
+      {
+        ids: ["368652"],
+        name: "Giorgian de Arrascaeta",
+        countryCode: "URU",
+        position: "MID",
+      },
+      {
+        ids: ["419020"],
+        name: "Gonzalo Plata",
+        countryCode: "ECU",
+        position: "ATT",
+      },
+    ],
+  },
+  {
+    name: "Sunderland",
+    country: "ENG",
+    players: [
+      {
+        ids: ["506028"],
+        name: "Robin Roefs",
+        countryCode: "NED",
+        position: "GK",
+      },
+      {
+        ids: ["431202"],
+        name: "Omar Alderete",
+        countryCode: "PAR",
+        position: "DEF",
+      },
+      {
+        ids: ["486147"],
+        name: "Noah Sadiki",
+        countryCode: "COD",
+        position: "MID",
+      },
+      {
+        ids: ["494293"],
+        name: "Chemsdine Talbi",
+        countryCode: "MAR",
+        position: "MID",
+      },
+      {
+        ids: ["486130"],
+        name: "Habib Diarra",
+        countryCode: "SEN",
+        position: "MID",
+      },
+      {
+        ids: ["311558"],
+        name: "Granit Xhaka",
+        countryCode: "SUI",
+        position: "MID",
+      },
+      {
+        ids: ["448312"],
+        name: "Nilson Angulo",
+        countryCode: "ECU",
+        position: "ATT",
+      },
+      {
+        ids: ["405879"],
+        name: "Wilson Isidor",
+        countryCode: "HAI",
+        position: "ATT",
+      },
+      {
+        ids: ["424051"],
+        name: "Brian Brobbey",
+        countryCode: "NED",
+        position: "ATT",
+      },
+    ],
+  },
+];
+
+export function getClubTeams(
+  allStats: PlayerTournamentStats[],
+  teamCountry: Record<string, string> = {},
+): ClubTeam[] {
+  const byId = new Map(allStats.map((s) => [s.player.id, s]));
+
+  const build = (club: ClubSpec): ClubTeam => {
+    const benchOnly = new Set<ClubLineupPlayer>();
+    const resolved: ClubLineupPlayer[] = club.players.map((spec) => {
+      let stats: PlayerTournamentStats | undefined;
+      for (const id of spec.ids) {
+        const s = byId.get(id);
+        if (s && (!stats || s.matchesPlayed > stats.matchesPlayed)) stats = s;
+      }
+      const p: ClubLineupPlayer = {
+        name: stats?.player.name ?? spec.name,
+        countryCode: stats
+          ? (teamCountry[stats.player.teamId] ?? spec.countryCode)
+          : spec.countryCode,
+        position: spec.position,
+        points: stats?.points ?? 0,
+        matchesPlayed: stats?.matchesPlayed ?? 0,
+      };
+      if (spec.benchOnly) benchOnly.add(p);
+      return p;
+    });
+
+    // Best predicted points first.
+    const pool = [...resolved].sort(
+      (a, b) => b.points - a.points || a.name.localeCompare(b.name),
+    );
+
+    const lineup: Record<Position, (ClubLineupPlayer | null)[]> = {
+      GK: [],
+      DEF: [],
+      MID: [],
+      ATT: [],
+    };
+    const placed = new Set<ClubLineupPlayer>();
+    const nation = new Map<string, number>();
+    const hasRoom = (p: ClubLineupPlayer) =>
+      !benchOnly.has(p) &&
+      lineup[p.position].length < CLUB_FORMATION[p.position];
+
+    // Pass 1: respect the max-2-per-nation rule.
+    for (const p of pool) {
+      if (!hasRoom(p) || (nation.get(p.countryCode) ?? 0) >= 2) continue;
+      lineup[p.position].push(p);
+      placed.add(p);
+      nation.set(p.countryCode, (nation.get(p.countryCode) ?? 0) + 1);
+    }
+    // Pass 2: fill any slot still open, overruling the nation rule if needed.
+    for (const p of pool) {
+      if (placed.has(p) || !hasRoom(p)) continue;
+      lineup[p.position].push(p);
+      placed.add(p);
+    }
+    // Pad unfilled slots with empties.
+    for (const pos of CLUB_POSITIONS) {
+      while (lineup[pos].length < CLUB_FORMATION[pos]) lineup[pos].push(null);
+    }
+
+    const filledCount = CLUB_POSITIONS.reduce(
+      (n, pos) => n + lineup[pos].filter(Boolean).length,
+      0,
+    );
+    const totalPoints = [...placed].reduce((sum, p) => sum + p.points, 0);
+    const bench = pool.filter((p) => !placed.has(p)); // already points-sorted
+    return {
+      name: club.name,
+      country: club.country,
+      totalPoints,
+      filledCount,
+      lineup,
+      bench,
+    };
+  };
+
+  return CLUBS.map(build).sort(
+    (a, b) => b.totalPoints - a.totalPoints || a.name.localeCompare(b.name),
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Swedish broadcasts
 // ---------------------------------------------------------------------------
 
