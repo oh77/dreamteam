@@ -38,6 +38,8 @@ export async function GET(request: NextRequest) {
     matchMinute: null,
     date: null,
     stageName: null,
+    placeholderA: null,
+    placeholderB: null,
   };
 
   const summary = await getMatchEventSummary(match);

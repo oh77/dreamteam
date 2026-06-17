@@ -31,6 +31,9 @@ export interface MatchInfo {
   matchMinute: string | null;
   date: string | null;
   stageName: string | null;
+  // Knockout bracket slots, e.g. "1F" / "2C" / "3ABCDF" (null for group games).
+  placeholderA: string | null;
+  placeholderB: string | null;
 }
 
 export function flagUrl(countryCode: string): string {
@@ -296,6 +299,8 @@ async function fetchAllMatches(): Promise<MatchInfo[]> {
         matchMinute: live ? (m.MatchTime ?? null) : null,
         date: m.Date ?? m.LocalDate ?? null,
         stageName: localName(m.StageName) || null,
+        placeholderA: m.PlaceHolderA || null,
+        placeholderB: m.PlaceHolderB || null,
       });
     }
 
@@ -3073,6 +3078,123 @@ export async function fetchSwedishBroadcasts(): Promise<
   } catch {
     return {};
   }
+}
+
+// ---------------------------------------------------------------------------
+// Group standings + knockout bracket projection
+// ---------------------------------------------------------------------------
+
+export interface StandingRow {
+  position: number;
+  teamId: string;
+  teamName: string;
+  countryCode: string;
+  played: number;
+  points: number;
+}
+
+// Current group standings keyed by group letter ("A".."L").
+export async function fetchStandings(
+  stageId: string,
+): Promise<Record<string, StandingRow[]>> {
+  "use cache";
+  cacheTag("fifa-pipeline");
+  cacheLife("minutes");
+
+  if (!stageId) return {};
+  try {
+    // biome-ignore lint/suspicious/noExplicitAny: FIFA API returns untyped JSON
+    const data = await fifaFetch<any>(
+      `/calendar/${COMPETITION_ID}/${SEASON_ID}/${stageId}/standing`,
+    );
+    // biome-ignore lint/suspicious/noExplicitAny: FIFA API returns untyped JSON
+    const rows: any[] = data.Results ?? [];
+    const byGroup: Record<string, StandingRow[]> = {};
+    for (const r of rows) {
+      const groupDesc = localName(r.Group);
+      const letter = (
+        groupDesc.match(/group\s+([a-z0-9]+)/i)?.[1] ?? ""
+      ).toUpperCase();
+      if (!letter) continue;
+      if (!byGroup[letter]) byGroup[letter] = [];
+      byGroup[letter].push({
+        position: Number(r.Position) || 0,
+        teamId: String(r.Team?.IdTeam ?? r.IdTeam ?? ""),
+        teamName: localName(r.Team?.Name),
+        countryCode: String(r.Team?.IdCountry ?? ""),
+        played: Number(r.Played) || 0,
+        points: Number(r.Points) || 0,
+      });
+    }
+    for (const letter of Object.keys(byGroup))
+      byGroup[letter].sort((a, b) => a.position - b.position);
+    return byGroup;
+  } catch {
+    return {};
+  }
+}
+
+export interface BracketSlot {
+  code: string; // "1F", "2C", "3ABCDF"
+  label: string; // "Winner F", "Runner-up C", "3rd A/B/C/D/F"
+  resolved: boolean;
+  teamName?: string;
+  countryCode?: string;
+  played?: number;
+}
+
+export interface BracketMatch {
+  date: string | null;
+  a: BracketSlot;
+  b: BracketSlot;
+}
+
+function resolveSlot(
+  code: string | null,
+  standings: Record<string, StandingRow[]>,
+): BracketSlot {
+  if (!code) return { code: "", label: "TBD", resolved: false };
+  const m = code.match(/^(\d)([A-Z]+)$/i);
+  if (!m) return { code, label: code, resolved: false };
+  const rank = Number(m[1]);
+  const groups = m[2].toUpperCase();
+
+  // Group winners / runners-up resolve to the team currently in that position.
+  if ((rank === 1 || rank === 2) && groups.length === 1) {
+    const label = `${rank === 1 ? "Winner" : "Runner-up"} ${groups}`;
+    const row = standings[groups]?.find((r) => r.position === rank);
+    return row
+      ? {
+          code,
+          label,
+          resolved: true,
+          teamName: row.teamName,
+          countryCode: row.countryCode,
+          played: row.played,
+        }
+      : { code, label, resolved: false };
+  }
+  // Best third-placed qualifiers: only show the group set (FIFA assigns these
+  // via a fixed table once the group stage finishes).
+  return { code, label: `3rd ${groups.split("").join("/")}`, resolved: false };
+}
+
+export function getRound32(
+  matches: MatchInfo[],
+  standings: Record<string, StandingRow[]>,
+): BracketMatch[] {
+  return matches
+    .filter(
+      (m) =>
+        /round of 32/i.test(m.stageName ?? "") &&
+        (m.placeholderA || m.placeholderB),
+    )
+    .sort((a, b) => (a.date ?? "").localeCompare(b.date ?? ""))
+    .map((m) => ({
+      date: m.date,
+      a: resolveSlot(m.placeholderA, standings),
+      b: resolveSlot(m.placeholderB, standings),
+    }));
 }
 
 // ---------------------------------------------------------------------------
