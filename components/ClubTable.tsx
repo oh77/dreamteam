@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import type { ClubTeam, Position } from "@/lib/fifa";
+import type { ClubLineupPlayer, ClubTeam, Position } from "@/lib/fifa";
+import { PlayerBreakdownDialog } from "./PlayerBreakdownDialog";
 
 const POSITIONS: Position[] = ["GK", "DEF", "MID", "ATT"];
 
@@ -32,6 +33,7 @@ function flag(countryCode: string) {
 
 function ClubRow({ club, rank }: { club: ClubTeam; rank: number }) {
   const [open, setOpen] = useState(false);
+  const [selected, setSelected] = useState<ClubLineupPlayer | null>(null);
 
   return (
     <div className="glass overflow-hidden rounded-2xl">
@@ -72,9 +74,11 @@ function ClubRow({ club, rank }: { club: ClubTeam; rank: number }) {
               <div className="flex flex-wrap gap-1.5">
                 {club.lineup[pos].map((p, i) =>
                   p ? (
-                    <span
+                    <button
                       key={`${pos}-${p.name}`}
-                      className="inline-flex items-center gap-1.5 rounded-lg bg-white/5 px-2 py-1 text-xs"
+                      type="button"
+                      onClick={() => setSelected(p)}
+                      className="inline-flex items-center gap-1.5 rounded-lg bg-white/5 px-2 py-1 text-xs transition-colors hover:bg-white/10"
                     >
                       {flag(p.countryCode)}
                       <span className="text-white/80">{lastName(p.name)}</span>
@@ -83,7 +87,7 @@ function ClubRow({ club, rank }: { club: ClubTeam; rank: number }) {
                       >
                         {p.points}
                       </span>
-                    </span>
+                    </button>
                   ) : (
                     <span
                       // biome-ignore lint/suspicious/noArrayIndexKey: empty slots are static, position-fixed placeholders
@@ -120,6 +124,13 @@ function ClubRow({ club, rank }: { club: ClubTeam; rank: number }) {
             </div>
           )}
         </div>
+      )}
+
+      {selected && (
+        <PlayerBreakdownDialog
+          player={selected}
+          onClose={() => setSelected(null)}
+        />
       )}
     </div>
   );

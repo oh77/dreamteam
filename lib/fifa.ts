@@ -88,6 +88,11 @@ export interface PlayerMatchStats {
   redCards: number;
   cleanSheet: boolean;
   goalsConceded: number;
+  // Whether the player actually took the field (starter or sub-on). Team-level
+  // rewards are credited to all squad members, but appearance counts must only
+  // reflect players who played. True when the lineup feed is unavailable, since
+  // we then cannot distinguish who played.
+  appeared: boolean;
 }
 
 export interface PlayerTournamentStats {
@@ -484,6 +489,7 @@ function computeMatchStats(
   match: MatchInfo,
   events: TimelineEvent[],
   squadByTeam: Map<string, FifaPlayer[]>,
+  appearedIds: Set<string> = new Set(),
 ): PlayerMatchStats[] {
   // Team-level rewards (match result, and a keeper's clean sheet / goals
   // conceded) are credited to EVERY member of the nation's squad, whether or
@@ -491,6 +497,9 @@ function computeMatchStats(
   // appearances. Individual rewards (goals, own goals, cards) are still tied to
   // the player who actually produced the event in the match timeline.
   const stats: PlayerMatchStats[] = [];
+  // Empty set => lineup feed unavailable, so we can't tell who played and treat
+  // every squad member as having appeared.
+  const appearanceKnown = appearedIds.size > 0;
 
   for (const teamId of [match.homeTeamId, match.awayTeamId]) {
     const isHome = match.homeTeamId === teamId;
@@ -512,6 +521,8 @@ function computeMatchStats(
       ).length;
 
       const isGk = player.position === "GK";
+      const hadEvent =
+        goalsScored > 0 || ownGoals > 0 || yellowCards > 0 || redCards > 0;
 
       stats.push({
         playerId: player.id,
@@ -524,6 +535,7 @@ function computeMatchStats(
         redCards,
         cleanSheet: isGk && concededByTeam === 0,
         goalsConceded: isGk ? concededByTeam : 0,
+        appeared: !appearanceKnown || appearedIds.has(player.id) || hadEvent,
       });
     }
   }
@@ -581,7 +593,7 @@ function aggregatePlayerStats(
     points: Object.values(breakdown).reduce((a, b) => a + b, 0),
     breakdown,
     totals,
-    matchesPlayed: matchStats.length,
+    matchesPlayed: matchStats.filter((ms) => ms.appeared).length,
   };
 }
 
@@ -628,9 +640,12 @@ export async function runPipeline(): Promise<PipelineResult> {
   const playerMatchStats = new Map<string, PlayerMatchStats[]>();
 
   for (const match of uniqueFinished) {
-    const events = await fetchTimeline(match.stageId, match.matchId);
+    const [events, appeared] = await Promise.all([
+      fetchTimeline(match.stageId, match.matchId),
+      fetchAppearedPlayerIds(match.stageId, match.matchId),
+    ]);
 
-    const matchStats = computeMatchStats(match, events, squadByTeam);
+    const matchStats = computeMatchStats(match, events, squadByTeam, appeared);
 
     for (const ms of matchStats) {
       if (!playerMatchStats.has(ms.playerId))
@@ -1119,10 +1134,12 @@ interface ClubSpec {
 
 export interface ClubLineupPlayer {
   name: string;
+  team: string;
   countryCode: string;
   position: Position;
   points: number;
   matchesPlayed: number;
+  baseBreakdown: PlayerTournamentStats["breakdown"];
 }
 
 export interface ClubTeam {
@@ -1176,12 +1193,6 @@ const CLUBS: ClubSpec[] = [
         ids: ["430669"],
         name: "Florian Wirtz",
         countryCode: "GER",
-        position: "MID",
-      },
-      {
-        ids: ["395318"],
-        name: "Wataru Endo",
-        countryCode: "JPN",
         position: "MID",
       },
       {
@@ -1459,12 +1470,6 @@ const CLUBS: ClubSpec[] = [
         ids: ["419177"],
         name: "William Saliba",
         countryCode: "FRA",
-        position: "DEF",
-      },
-      {
-        ids: ["448158"],
-        name: "Jurriën Timber",
-        countryCode: "NED",
         position: "DEF",
       },
       {
@@ -2871,12 +2876,22 @@ export function getClubTeams(
       }
       const p: ClubLineupPlayer = {
         name: stats?.player.name ?? spec.name,
+        team: stats?.player.teamName ?? "",
         countryCode: stats
           ? (teamCountry[stats.player.teamId] ?? spec.countryCode)
           : spec.countryCode,
         position: spec.position,
         points: stats?.points ?? 0,
         matchesPlayed: stats?.matchesPlayed ?? 0,
+        baseBreakdown: stats?.breakdown ?? {
+          matchResults: 0,
+          goals: 0,
+          cleanSheets: 0,
+          goalsConceded: 0,
+          ownGoals: 0,
+          yellowCards: 0,
+          redCards: 0,
+        },
       };
       if (spec.benchOnly) benchOnly.add(p);
       return p;
@@ -3185,9 +3200,6 @@ export async function getMatchEventSummary(
     fetchSquad(match.homeTeamId, match.homeTeamName),
     fetchSquad(match.awayTeamId, match.awayTeamName),
   ]);
-  // When the lineup feed is missing we can't tell who played, so don't dim.
-  const appearanceKnown = appeared.size > 0;
-
   const allPlayers = new Map<string, FifaPlayer>();
   for (const p of [...homeSquad, ...awaySquad]) allPlayers.set(p.id, p);
 
@@ -3196,7 +3208,7 @@ export async function getMatchEventSummary(
     [match.awayTeamId, awaySquad],
   ]);
 
-  const matchStats = computeMatchStats(match, events, squadByTeam);
+  const matchStats = computeMatchStats(match, events, squadByTeam, appeared);
 
   const homeWins = match.homeScore > match.awayScore;
   const awayWins = match.awayScore > match.homeScore;
@@ -3237,12 +3249,6 @@ export async function getMatchEventSummary(
       if (s.cleanSheet) pts += POINTS.CLEAN_SHEET_GK;
       pts += s.goalsConceded * POINTS.GOAL_CONCEDED_GK;
 
-      const hadEvent =
-        s.goalsScored > 0 ||
-        s.ownGoals > 0 ||
-        s.yellowCards > 0 ||
-        s.redCards > 0;
-
       return {
         playerName: player.name,
         teamId: s.teamId,
@@ -3255,7 +3261,7 @@ export async function getMatchEventSummary(
         cleanSheet: s.cleanSheet,
         goalsConceded: s.goalsConceded,
         specialPoints: pts,
-        played: !appearanceKnown || appeared.has(s.playerId) || hadEvent,
+        played: s.appeared,
       };
     })
     .filter((p): p is MatchPlayerPoints => p !== null)
