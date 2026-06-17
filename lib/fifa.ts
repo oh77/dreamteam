@@ -3090,6 +3090,12 @@ export interface StandingRow {
   teamName: string;
   countryCode: string;
   played: number;
+  won: number;
+  drawn: number;
+  lost: number;
+  goalsFor: number;
+  goalsAgainst: number;
+  goalDiff: number;
   points: number;
 }
 
@@ -3117,12 +3123,20 @@ export async function fetchStandings(
       ).toUpperCase();
       if (!letter) continue;
       if (!byGroup[letter]) byGroup[letter] = [];
+      const goalsFor = Number(r.For) || 0;
+      const goalsAgainst = Number(r.Against) || 0;
       byGroup[letter].push({
         position: Number(r.Position) || 0,
         teamId: String(r.Team?.IdTeam ?? r.IdTeam ?? ""),
         teamName: localName(r.Team?.Name),
         countryCode: String(r.Team?.IdCountry ?? ""),
         played: Number(r.Played) || 0,
+        won: Number(r.Won) || 0,
+        drawn: Number(r.Drawn) || 0,
+        lost: Number(r.Lost) || 0,
+        goalsFor,
+        goalsAgainst,
+        goalDiff: Number(r.GoalsDiference ?? goalsFor - goalsAgainst) || 0,
         points: Number(r.Points) || 0,
       });
     }
