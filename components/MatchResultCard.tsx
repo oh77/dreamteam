@@ -68,8 +68,14 @@ function PlayerPointsRow({ player }: { player: MatchPlayerPoints }) {
 
   const pts = player.specialPoints;
 
+  // Squad members are credited for their nation's result even without playing;
+  // de-emphasise those who didn't take the field.
+  const dnp = !player.played;
+
   return (
-    <div className="flex items-center gap-2 py-1 text-xs">
+    <div
+      className={`flex items-center gap-2 py-1 text-xs ${dnp ? "opacity-45" : ""}`}
+    >
       <span
         className={`rounded px-1 py-0.5 text-[10px] font-bold uppercase shrink-0 ${posColor[player.position]}`}
       >
@@ -77,6 +83,11 @@ function PlayerPointsRow({ player }: { player: MatchPlayerPoints }) {
       </span>
       <span className="text-white/80 min-w-0 truncate flex-1">
         {player.playerName}
+        {dnp && (
+          <span className="ml-1.5 text-[9px] font-medium uppercase tracking-wider text-white/30">
+            DNP
+          </span>
+        )}
       </span>
       <span className="text-white/40 shrink-0 text-[11px]">
         {icons.join(" ")}

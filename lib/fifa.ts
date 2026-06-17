@@ -424,47 +424,56 @@ function parseEvent(e: any): TimelineEvent[] {
   return [{ ...base, type: "Unknown" }];
 }
 
-async function fetchMatchLineup(
+// Player ids who actually appeared in a match (starters + substitutes who came
+// on). Used only to distinguish who played from squad members credited by the
+// national-team result. Returns an empty set if the lineup feed is unavailable,
+// which callers treat as "appearance unknown".
+async function fetchAppearedPlayerIds(
   stageId: string,
   matchId: string,
-): Promise<MatchLineup | null> {
+): Promise<Set<string>> {
+  const ids = new Set<string>();
   try {
     // biome-ignore lint/suspicious/noExplicitAny: FIFA API returns untyped JSON
     const data = await fifaFetch<any>(
       `/live/football/${COMPETITION_ID}/${SEASON_ID}/${stageId}/${matchId}`,
     );
-    const home: Record<string, unknown> = data.Home ?? data.HomeTeam ?? {};
-    const away: Record<string, unknown> = data.Away ?? data.AwayTeam ?? {};
+    // The unused side is sometimes an empty array rather than null, so prefer
+    // whichever object actually carries a roster instead of trusting `??`.
+    const pickTeam = (
+      // biome-ignore lint/suspicious/noExplicitAny: FIFA API returns untyped JSON
+      ...candidates: any[]
+    ): Record<string, unknown> => {
+      for (const c of candidates) {
+        const roster = c?.Players ?? c?.StartingEleven;
+        if (Array.isArray(roster) && roster.length > 0) return c;
+      }
+      return {};
+    };
 
-    // Only players who actually took the field: starters (Status 1) plus any
-    // substitute who came on. The roster array is the full squad, so unused
-    // bench players (incl. backup keepers) must be excluded.
-    const extractIds = (team: Record<string, unknown>): Set<string> => {
-      const ids = new Set<string>();
+    for (const team of [
+      pickTeam(data.Home, data.HomeTeam),
+      pickTeam(data.Away, data.AwayTeam),
+    ]) {
       // biome-ignore lint/suspicious/noExplicitAny: FIFA API returns untyped JSON
       const roster = (team.Players ?? team.StartingEleven ?? []) as any[];
-      // If Status is present, 1 = starter; otherwise treat the list as starters.
       const hasStatus = roster.some((p) => p.Status != null);
       for (const p of roster) {
         const id = String(p.IdPlayer ?? p.PlayerId ?? "");
-        if (id && (!hasStatus || Number(p.Status) === 1)) ids.add(id);
+        // Only confirmed starters (Status 1). Without Status we cannot tell
+        // starters from bench, so we add nobody here and lean on substitutions.
+        if (id && hasStatus && Number(p.Status) === 1) ids.add(id);
       }
       // biome-ignore lint/suspicious/noExplicitAny: FIFA API returns untyped JSON
       for (const s of (team.Substitutions ?? []) as any[]) {
         const on = String(s.IdPlayerOn ?? "");
         if (on) ids.add(on);
       }
-      return ids;
-    };
-
-    return {
-      matchId,
-      homeTeamPlayerIds: extractIds(home),
-      awayTeamPlayerIds: extractIds(away),
-    };
+    }
   } catch {
-    return null;
+    // Leave the set empty — callers treat that as "appearance unknown".
   }
+  return ids;
 }
 
 // ---------------------------------------------------------------------------
@@ -474,136 +483,49 @@ async function fetchMatchLineup(
 function computeMatchStats(
   match: MatchInfo,
   events: TimelineEvent[],
-  lineup: MatchLineup | null,
-  allPlayers: Map<string, FifaPlayer>,
   squadByTeam: Map<string, FifaPlayer[]>,
 ): PlayerMatchStats[] {
-  let participants: Set<string>;
-  if (lineup) {
-    participants = new Set([
-      ...lineup.homeTeamPlayerIds,
-      ...lineup.awayTeamPlayerIds,
-    ]);
-  } else {
-    participants = new Set(
-      events.filter((e) => allPlayers.has(e.playerId)).map((e) => e.playerId),
-    );
-  }
-
-  const goalMinutes = events
-    .filter((e) => e.type === "Goal" || e.type === "OwnGoal")
-    .map((e) => ({
-      minute: e.minute,
-      scoringTeamId:
-        e.type === "OwnGoal"
-          ? e.teamId === match.homeTeamId
-            ? match.awayTeamId
-            : match.homeTeamId
-          : e.teamId,
-    }));
-
-  function resolveGkPeriods(
-    teamId: string,
-  ): Map<string, { from: number; to: number }> {
-    const teamGks = (squadByTeam.get(teamId) ?? []).filter(
-      (p) => p.position === "GK",
-    );
-    const gkIds = new Set(teamGks.map((p) => p.id));
-    const periods = new Map<string, { from: number; to: number }>();
-
-    const gkSubOut = events.find(
-      (e) =>
-        e.type === "SubstituteOut" &&
-        e.teamId === teamId &&
-        gkIds.has(e.playerId),
-    );
-    const gkSubIn = events.find(
-      (e) =>
-        e.type === "SubstituteIn" &&
-        e.teamId === teamId &&
-        gkIds.has(e.playerId),
-    );
-
-    if (gkSubOut && gkSubIn) {
-      periods.set(gkSubOut.playerId, { from: 0, to: gkSubOut.minute });
-      periods.set(gkSubIn.playerId, { from: gkSubOut.minute, to: 90 });
-      return periods;
-    }
-
-    if (lineup) {
-      const lineupIds = new Set([
-        ...lineup.homeTeamPlayerIds,
-        ...lineup.awayTeamPlayerIds,
-      ]);
-      const startingGk = teamGks.find((p) => lineupIds.has(p.id));
-      if (startingGk) {
-        periods.set(startingGk.id, { from: 0, to: 90 });
-        return periods;
-      }
-    }
-
-    if (teamGks.length === 1) periods.set(teamGks[0].id, { from: 0, to: 90 });
-    return periods;
-  }
-
-  const homeGkPeriods = resolveGkPeriods(match.homeTeamId);
-  const awayGkPeriods = resolveGkPeriods(match.awayTeamId);
-
-  function gkGoalsConceded(gkTeamId: string, from: number, to: number): number {
-    return goalMinutes.filter(
-      (g) => g.scoringTeamId !== gkTeamId && g.minute >= from && g.minute <= to,
-    ).length;
-  }
-
+  // Team-level rewards (match result, and a keeper's clean sheet / goals
+  // conceded) are credited to EVERY member of the nation's squad, whether or
+  // not they took the field — scoring follows the national-team result, not
+  // appearances. Individual rewards (goals, own goals, cards) are still tied to
+  // the player who actually produced the event in the match timeline.
   const stats: PlayerMatchStats[] = [];
 
-  for (const playerId of participants) {
-    const player = allPlayers.get(playerId);
-    if (!player) continue;
-
-    const teamId = player.teamId;
+  for (const teamId of [match.homeTeamId, match.awayTeamId]) {
     const isHome = match.homeTeamId === teamId;
     const teamScore = isHome ? match.homeScore : match.awayScore;
     const oppScore = isHome ? match.awayScore : match.homeScore;
     const outcomeVal: "WIN" | "DRAW" | "LOSS" =
       teamScore > oppScore ? "WIN" : teamScore === oppScore ? "DRAW" : "LOSS";
+    const concededByTeam = oppScore;
 
-    const playerEvents = events.filter((e) => e.playerId === playerId);
-    const goalsScored = playerEvents.filter((e) => e.type === "Goal").length;
-    const ownGoals = playerEvents.filter((e) => e.type === "OwnGoal").length;
-    const yellowCards = playerEvents.filter(
-      (e) => e.type === "YellowCard" || e.type === "YellowRedCard",
-    ).length;
-    const redCards = playerEvents.filter(
-      (e) => e.type === "RedCard" || e.type === "YellowRedCard",
-    ).length;
+    for (const player of squadByTeam.get(teamId) ?? []) {
+      const playerEvents = events.filter((e) => e.playerId === player.id);
+      const goalsScored = playerEvents.filter((e) => e.type === "Goal").length;
+      const ownGoals = playerEvents.filter((e) => e.type === "OwnGoal").length;
+      const yellowCards = playerEvents.filter(
+        (e) => e.type === "YellowCard" || e.type === "YellowRedCard",
+      ).length;
+      const redCards = playerEvents.filter(
+        (e) => e.type === "RedCard" || e.type === "YellowRedCard",
+      ).length;
 
-    let cleanSheet = false;
-    let goalsConceded = 0;
+      const isGk = player.position === "GK";
 
-    if (player.position === "GK") {
-      const gkPeriods = isHome ? homeGkPeriods : awayGkPeriods;
-      const period = gkPeriods.get(playerId);
-      if (period) {
-        goalsConceded = gkGoalsConceded(teamId, period.from, period.to);
-        const concededByTeam = isHome ? match.awayScore : match.homeScore;
-        cleanSheet =
-          period.from === 0 && period.to === 90 && concededByTeam === 0;
-      }
+      stats.push({
+        playerId: player.id,
+        matchId: match.matchId,
+        teamId,
+        outcome: outcomeVal,
+        goalsScored,
+        ownGoals,
+        yellowCards,
+        redCards,
+        cleanSheet: isGk && concededByTeam === 0,
+        goalsConceded: isGk ? concededByTeam : 0,
+      });
     }
-
-    stats.push({
-      playerId,
-      matchId: match.matchId,
-      teamId,
-      outcome: outcomeVal,
-      goalsScored,
-      ownGoals,
-      yellowCards,
-      redCards,
-      cleanSheet,
-      goalsConceded,
-    });
   }
 
   return stats;
@@ -706,18 +628,9 @@ export async function runPipeline(): Promise<PipelineResult> {
   const playerMatchStats = new Map<string, PlayerMatchStats[]>();
 
   for (const match of uniqueFinished) {
-    const [events, lineup] = await Promise.all([
-      fetchTimeline(match.stageId, match.matchId),
-      fetchMatchLineup(match.stageId, match.matchId),
-    ]);
+    const events = await fetchTimeline(match.stageId, match.matchId);
 
-    const matchStats = computeMatchStats(
-      match,
-      events,
-      lineup,
-      allPlayersMap,
-      squadByTeam,
-    );
+    const matchStats = computeMatchStats(match, events, squadByTeam);
 
     for (const ms of matchStats) {
       if (!playerMatchStats.has(ms.playerId))
@@ -3227,6 +3140,9 @@ export interface MatchPlayerPoints {
   cleanSheet: boolean;
   goalsConceded: number;
   specialPoints: number;
+  // Whether the player actually took the field. Squad members are credited for
+  // their nation's result regardless, so this only flags who to de-emphasise.
+  played: boolean;
 }
 
 export type TimelineEntryKind =
@@ -3263,12 +3179,14 @@ export interface MatchEventSummary {
 export async function getMatchEventSummary(
   match: MatchInfo,
 ): Promise<MatchEventSummary> {
-  const [events, lineup, homeSquad, awaySquad] = await Promise.all([
+  const [events, appeared, homeSquad, awaySquad] = await Promise.all([
     fetchTimeline(match.stageId, match.matchId),
-    fetchMatchLineup(match.stageId, match.matchId),
+    fetchAppearedPlayerIds(match.stageId, match.matchId),
     fetchSquad(match.homeTeamId, match.homeTeamName),
     fetchSquad(match.awayTeamId, match.awayTeamName),
   ]);
+  // When the lineup feed is missing we can't tell who played, so don't dim.
+  const appearanceKnown = appeared.size > 0;
 
   const allPlayers = new Map<string, FifaPlayer>();
   for (const p of [...homeSquad, ...awaySquad]) allPlayers.set(p.id, p);
@@ -3278,13 +3196,7 @@ export async function getMatchEventSummary(
     [match.awayTeamId, awaySquad],
   ]);
 
-  const matchStats = computeMatchStats(
-    match,
-    events,
-    lineup,
-    allPlayers,
-    squadByTeam,
-  );
+  const matchStats = computeMatchStats(match, events, squadByTeam);
 
   const homeWins = match.homeScore > match.awayScore;
   const awayWins = match.awayScore > match.homeScore;
@@ -3325,6 +3237,12 @@ export async function getMatchEventSummary(
       if (s.cleanSheet) pts += POINTS.CLEAN_SHEET_GK;
       pts += s.goalsConceded * POINTS.GOAL_CONCEDED_GK;
 
+      const hadEvent =
+        s.goalsScored > 0 ||
+        s.ownGoals > 0 ||
+        s.yellowCards > 0 ||
+        s.redCards > 0;
+
       return {
         playerName: player.name,
         teamId: s.teamId,
@@ -3337,6 +3255,7 @@ export async function getMatchEventSummary(
         cleanSheet: s.cleanSheet,
         goalsConceded: s.goalsConceded,
         specialPoints: pts,
+        played: !appearanceKnown || appeared.has(s.playerId) || hadEvent,
       };
     })
     .filter((p): p is MatchPlayerPoints => p !== null)
