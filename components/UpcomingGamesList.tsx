@@ -44,6 +44,23 @@ function formatShortDate(iso: string | null): string {
   });
 }
 
+// A team is "set" once FIFA has assigned a real team to the slot. Knockout
+// fixtures start out with an empty teamId and an "Unknown" name.
+function isTeamSet(teamId: string, teamName: string): boolean {
+  return Boolean(teamId) && teamName !== "Unknown";
+}
+
+// Turn a knockout placeholder code into its display form: "1F"/"2F" stay as-is,
+// while a third-place set like "3ABCDE" becomes "3A/B/C/D/E".
+function formatPlaceholder(code: string | null): string {
+  if (!code) return "TBD";
+  const m = code.match(/^(\d)([A-Z]+)$/i);
+  if (!m) return code;
+  const [, rank, groups] = m;
+  const letters = groups.toUpperCase().split("");
+  return `${rank}${letters.join("/")}`;
+}
+
 function ordinal(n: number): string {
   const rem = n % 100;
   if (rem >= 11 && rem <= 13) return `${n}th`;
@@ -61,6 +78,23 @@ function ordinal(n: number): string {
 
 function byDate(a: MatchInfo, b: MatchInfo): number {
   return (a.date ?? "").localeCompare(b.date ?? "");
+}
+
+function Flag({
+  countryCode,
+  className = "h-5 w-5",
+}: {
+  countryCode?: string;
+  className?: string;
+}) {
+  if (!countryCode) return null;
+  return (
+    <img
+      src={`https://api.fifa.com/api/v3/picture/flags-sq-2/${countryCode}`}
+      alt=""
+      className={`shrink-0 rounded-sm object-cover ${className}`}
+    />
+  );
 }
 
 function SwedishBroadcasters({ sources }: { sources: BroadcastSource[] }) {
@@ -99,6 +133,7 @@ function SwedishBroadcasters({ sources }: { sources: BroadcastSource[] }) {
 function TeamMatchRow({ m, teamId }: { m: MatchInfo; teamId: string }) {
   const isHome = m.homeTeamId === teamId;
   const oppName = isHome ? m.awayTeamName : m.homeTeamName;
+  const oppCountry = isHome ? m.awayCountryCode : m.homeCountryCode;
   const teamScore = isHome ? m.homeScore : m.awayScore;
   const oppScore = isHome ? m.awayScore : m.homeScore;
 
@@ -112,7 +147,10 @@ function TeamMatchRow({ m, teamId }: { m: MatchInfo; teamId: string }) {
 
   return (
     <div className="flex items-center justify-between gap-2 py-1 text-[12px]">
-      <span className="min-w-0 truncate text-white/70">{oppName}</span>
+      <span className="flex min-w-0 items-center gap-1.5 text-white/70">
+        <Flag countryCode={oppCountry} className="h-3.5 w-3.5" />
+        <span className="min-w-0 truncate">{oppName}</span>
+      </span>
       {m.finished ? (
         <span className={`shrink-0 font-bold tabular-nums ${result}`}>
           {teamScore}–{oppScore}
@@ -134,6 +172,8 @@ function TeamMatchRow({ m, teamId }: { m: MatchInfo; teamId: string }) {
 function TeamColumn({
   teamId,
   teamName,
+  countryCode,
+  placeholder,
   currentMatchId,
   allMatches,
   standings,
@@ -141,11 +181,28 @@ function TeamColumn({
 }: {
   teamId: string;
   teamName: string;
+  countryCode: string;
+  placeholder: string;
   currentMatchId: string;
   allMatches: MatchInfo[];
   standings: Record<string, StandingRow[]>;
   teamToGroup: Record<string, string>;
 }) {
+  // Until the slot has a real team, show only its placeholder code — don't try
+  // to match fixtures (an empty teamId would collide with other open slots).
+  if (!isTeamSet(teamId, teamName)) {
+    return (
+      <div className="min-w-0">
+        <div className="truncate font-bold text-white/40 text-sm italic">
+          {placeholder}
+        </div>
+        <div className="mt-1 text-[11px] text-white/30">
+          Awaiting group stage
+        </div>
+      </div>
+    );
+  }
+
   const letter = teamToGroup[teamId];
   const row = letter
     ? standings[letter]?.find((r) => r.teamId === teamId)
@@ -164,8 +221,11 @@ function TeamColumn({
   return (
     <div className="min-w-0">
       <div className="mb-2">
-        <div className="truncate font-bold text-white text-sm">
-          {teamName || "TBD"}
+        <div className="flex min-w-0 items-center gap-1.5">
+          <Flag countryCode={countryCode} className="h-4 w-4" />
+          <span className="truncate font-bold text-white text-sm">
+            {teamName || "TBD"}
+          </span>
         </div>
         {row && (
           <div className="mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[11px] text-white/50">
@@ -239,6 +299,11 @@ function GameCard({
 }) {
   const [open, setOpen] = useState(false);
 
+  const homeSet = isTeamSet(match.homeTeamId, match.homeTeamName);
+  const awaySet = isTeamSet(match.awayTeamId, match.awayTeamName);
+  const homePlaceholder = formatPlaceholder(match.placeholderA);
+  const awayPlaceholder = formatPlaceholder(match.placeholderB);
+
   return (
     <div className="glass rounded-2xl px-5 py-4">
       <button
@@ -249,10 +314,13 @@ function GameCard({
       >
         <div className="flex items-center justify-between gap-3">
           {/* Home team */}
-          <div className="flex-1 text-right">
-            <span className="font-semibold text-white text-sm sm:text-base">
-              {match.homeTeamName}
+          <div className="flex flex-1 items-center justify-end gap-2 text-right">
+            <span
+              className={`min-w-0 truncate text-sm sm:text-base ${homeSet ? "font-semibold text-white" : "font-semibold italic text-white/40"}`}
+            >
+              {homeSet ? match.homeTeamName : homePlaceholder}
             </span>
+            {homeSet && <Flag countryCode={match.homeCountryCode} />}
           </div>
 
           {/* Live score + minute, or VS + kickoff time (CET) */}
@@ -285,9 +353,12 @@ function GameCard({
           </div>
 
           {/* Away team */}
-          <div className="flex-1">
-            <span className="font-semibold text-white text-sm sm:text-base">
-              {match.awayTeamName}
+          <div className="flex flex-1 items-center gap-2">
+            {awaySet && <Flag countryCode={match.awayCountryCode} />}
+            <span
+              className={`min-w-0 truncate text-sm sm:text-base ${awaySet ? "font-semibold text-white" : "font-semibold italic text-white/40"}`}
+            >
+              {awaySet ? match.awayTeamName : awayPlaceholder}
             </span>
           </div>
         </div>
@@ -327,6 +398,8 @@ function GameCard({
             <TeamColumn
               teamId={match.homeTeamId}
               teamName={match.homeTeamName}
+              countryCode={match.homeCountryCode}
+              placeholder={homePlaceholder}
               currentMatchId={match.matchId}
               allMatches={allMatches}
               standings={standings}
@@ -337,6 +410,8 @@ function GameCard({
             <TeamColumn
               teamId={match.awayTeamId}
               teamName={match.awayTeamName}
+              countryCode={match.awayCountryCode}
+              placeholder={awayPlaceholder}
               currentMatchId={match.matchId}
               allMatches={allMatches}
               standings={standings}

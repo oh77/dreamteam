@@ -1,6 +1,11 @@
 import { cacheLife, cacheTag } from "next/cache";
-import type { BracketMatch, BracketSlot } from "@/lib/fifa";
-import { fetchStandings, getRound32, runPipeline } from "@/lib/fifa";
+import type { BracketMatch, BracketSlot, ThirdPlaceRow } from "@/lib/fifa";
+import {
+  fetchStandings,
+  getRound32,
+  getThirdPlaceRanking,
+  runPipeline,
+} from "@/lib/fifa";
 
 function formatDate(dateStr: string): string {
   if (dateStr === "TBD") return "Date TBD";
@@ -22,7 +27,7 @@ function groupByDate(items: BracketMatch[]): Map<string, BracketMatch[]> {
   return groups;
 }
 
-function flag(countryCode?: string) {
+function Flag({ countryCode }: { countryCode?: string }) {
   if (!countryCode) return null;
   return (
     <img
@@ -36,11 +41,7 @@ function flag(countryCode?: string) {
 }
 
 function Side({ slot, align }: { slot: BracketSlot; align: "left" | "right" }) {
-  const team = slot.resolved ? (
-    <span className="truncate font-semibold text-white">{slot.teamName}</span>
-  ) : (
-    <span className="truncate text-sm text-white/40 italic">{slot.label}</span>
-  );
+  const thirdFlags = slot.groupCountryCodes ?? [];
   return (
     <div
       className={`flex min-w-0 flex-col gap-0.5 ${align === "right" ? "items-end" : "items-start"}`}
@@ -48,12 +49,85 @@ function Side({ slot, align }: { slot: BracketSlot; align: "left" | "right" }) {
       <div
         className={`flex min-w-0 items-center gap-1.5 ${align === "right" ? "flex-row-reverse" : ""}`}
       >
-        {slot.resolved && flag(slot.countryCode)}
-        {team}
+        {slot.resolved ? (
+          <>
+            <Flag countryCode={slot.countryCode} />
+            <span className="truncate font-semibold text-white">
+              {slot.teamName}
+            </span>
+          </>
+        ) : thirdFlags.length > 0 ? (
+          // Best third-placed qualifiers: show each group's current third-placed
+          // team as a flag (no name — FIFA assigns the actual matchup later).
+          <div className="flex min-w-0 flex-wrap items-center gap-1">
+            {thirdFlags.map((c) => (
+              <Flag key={c} countryCode={c} />
+            ))}
+          </div>
+        ) : (
+          <span className="truncate text-sm text-white/40 italic">
+            {slot.label}
+          </span>
+        )}
       </div>
       <span className="text-[10px] font-bold uppercase tracking-widest text-[color:var(--color-gold)]/60">
         {slot.code}
       </span>
+    </div>
+  );
+}
+
+function ThirdPlaceTable({
+  rows,
+  qualifyCount,
+}: {
+  rows: ThirdPlaceRow[];
+  qualifyCount: number;
+}) {
+  return (
+    <div className="glass overflow-hidden rounded-2xl">
+      <div className="grid grid-cols-[1.5rem_1fr_2.5rem_2.5rem_2.5rem] items-center gap-2 px-4 py-2.5 text-[10px] font-bold uppercase tracking-widest text-white/30">
+        <span className="text-right">#</span>
+        <span>Team</span>
+        <span className="text-right">Pts</span>
+        <span className="text-right">GD</span>
+        <span className="text-right">GF</span>
+      </div>
+      <div className="divide-y divide-white/5">
+        {rows.map((r, i) => {
+          const qualifies = qualifyCount > 0 && i < qualifyCount;
+          return (
+            <div
+              key={r.teamId}
+              className={`grid grid-cols-[1.5rem_1fr_2.5rem_2.5rem_2.5rem] items-center gap-2 px-4 py-2.5 ${
+                qualifies ? "" : "opacity-50"
+              }`}
+            >
+              <span className="text-right text-sm font-bold tabular-nums text-white/40">
+                {i + 1}
+              </span>
+              <div className="flex min-w-0 items-center gap-2">
+                <Flag countryCode={r.countryCode} />
+                <span className="truncate text-sm font-semibold text-white">
+                  {r.teamName}
+                </span>
+                <span className="shrink-0 rounded bg-white/10 px-1.5 py-0.5 text-[10px] font-bold text-white/60">
+                  {r.group}
+                </span>
+              </div>
+              <span className="text-right text-sm font-bold tabular-nums text-[color:var(--color-gold)]">
+                {r.points}
+              </span>
+              <span className="text-right text-sm tabular-nums text-white/60">
+                {r.goalDiff > 0 ? `+${r.goalDiff}` : r.goalDiff}
+              </span>
+              <span className="text-right text-sm tabular-nums text-white/60">
+                {r.goalsFor}
+              </span>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -83,6 +157,13 @@ export default async function BracketPage() {
   }
 
   const grouped = groupByDate(round32);
+
+  // Best third-placed teams ranked head-to-head. The number that actually
+  // qualify equals the count of third-place slots in the Round of 32 bracket.
+  const thirdRanking = getThirdPlaceRanking(standings);
+  const thirdQualifyCount = round32
+    .flatMap((m) => [m.a, m.b])
+    .filter((s) => /^3/.test(s.code)).length;
 
   return (
     <div className="mx-auto max-w-3xl px-4 py-8">
@@ -119,6 +200,24 @@ export default async function BracketPage() {
           </div>
         ))}
       </div>
+
+      {thirdRanking.length > 0 && (
+        <div className="mt-12">
+          <h2 className="text-xl font-black text-white">
+            Third-placed ranking
+          </h2>
+          <p className="mt-1 mb-4 text-xs text-white/30">
+            All third-placed teams ranked by points, then goal difference, then
+            goals scored.
+            {thirdQualifyCount > 0 &&
+              ` The top ${thirdQualifyCount} advance to the Round of 32.`}
+          </p>
+          <ThirdPlaceTable
+            rows={thirdRanking}
+            qualifyCount={thirdQualifyCount}
+          />
+        </div>
+      )}
     </div>
   );
 }

@@ -3083,6 +3083,9 @@ export interface BracketSlot {
   teamName?: string;
   countryCode?: string;
   played?: number;
+  // For unresolved third-placed slots: the country code of each group's
+  // current third-placed team, so the bracket can show flags instead of text.
+  groupCountryCodes?: string[];
 }
 
 export interface BracketMatch {
@@ -3116,9 +3119,43 @@ function resolveSlot(
         }
       : { code, label, resolved: false };
   }
-  // Best third-placed qualifiers: only show the group set (FIFA assigns these
-  // via a fixed table once the group stage finishes).
-  return { code, label: `3rd ${groups.split("").join("/")}`, resolved: false };
+  // Best third-placed qualifiers: FIFA assigns these via a fixed table once the
+  // group stage finishes, so the matchup stays unresolved. Surface the current
+  // third-placed team of each candidate group so the bracket can show flags.
+  const groupCountryCodes = groups
+    .split("")
+    .map((g) => standings[g]?.find((r) => r.position === 3)?.countryCode)
+    .filter((c): c is string => Boolean(c));
+  return {
+    code,
+    label: `3rd ${groups.split("").join("/")}`,
+    resolved: false,
+    groupCountryCodes,
+  };
+}
+
+export interface ThirdPlaceRow extends StandingRow {
+  group: string;
+}
+
+// Rank every group's third-placed team against each other, the way FIFA picks
+// the best third-placed qualifiers: points, then goal difference, then goals
+// scored.
+export function getThirdPlaceRanking(
+  standings: Record<string, StandingRow[]>,
+): ThirdPlaceRow[] {
+  return Object.entries(standings)
+    .map(([group, rows]) => {
+      const row = rows.find((r) => r.position === 3);
+      return row ? { ...row, group } : null;
+    })
+    .filter((r): r is ThirdPlaceRow => r !== null)
+    .sort(
+      (a, b) =>
+        b.points - a.points ||
+        b.goalDiff - a.goalDiff ||
+        b.goalsFor - a.goalsFor,
+    );
 }
 
 export function getRound32(
