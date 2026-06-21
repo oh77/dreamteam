@@ -1,31 +1,11 @@
 import { cacheLife, cacheTag } from "next/cache";
-import type { BracketMatch, BracketSlot, ThirdPlaceRow } from "@/lib/fifa";
+import type { BracketSlot, ThirdPlaceRow } from "@/lib/fifa";
 import {
   fetchStandings,
   getRound32,
   getThirdPlaceRanking,
   runPipeline,
 } from "@/lib/fifa";
-
-function formatDate(dateStr: string): string {
-  if (dateStr === "TBD") return "Date TBD";
-  const d = new Date(dateStr);
-  return d.toLocaleDateString("en-GB", {
-    weekday: "long",
-    day: "numeric",
-    month: "long",
-  });
-}
-
-function groupByDate(items: BracketMatch[]): Map<string, BracketMatch[]> {
-  const groups = new Map<string, BracketMatch[]>();
-  for (const m of items) {
-    const key = m.date ? m.date.slice(0, 10) : "TBD";
-    if (!groups.has(key)) groups.set(key, []);
-    (groups.get(key) ?? []).push(m);
-  }
-  return groups;
-}
 
 function Flag({ countryCode }: { countryCode?: string }) {
   if (!countryCode) return null;
@@ -86,9 +66,10 @@ function ThirdPlaceTable({
 }) {
   return (
     <div className="glass overflow-hidden rounded-2xl">
-      <div className="grid grid-cols-[1.5rem_1fr_2.5rem_2.5rem_2.5rem] items-center gap-2 px-4 py-2.5 text-[10px] font-bold uppercase tracking-widest text-white/30">
+      <div className="grid grid-cols-[1.5rem_1fr_2.5rem_2.5rem_2.5rem_2.5rem] items-center gap-2 px-4 py-2.5 text-[10px] font-bold uppercase tracking-widest text-white/30">
         <span className="text-right">#</span>
         <span>Team</span>
+        <span className="text-right">P</span>
         <span className="text-right">Pts</span>
         <span className="text-right">GD</span>
         <span className="text-right">GF</span>
@@ -99,7 +80,7 @@ function ThirdPlaceTable({
           return (
             <div
               key={r.teamId}
-              className={`grid grid-cols-[1.5rem_1fr_2.5rem_2.5rem_2.5rem] items-center gap-2 px-4 py-2.5 ${
+              className={`grid grid-cols-[1.5rem_1fr_2.5rem_2.5rem_2.5rem_2.5rem] items-center gap-2 px-4 py-2.5 ${
                 qualifies ? "" : "opacity-50"
               }`}
             >
@@ -115,6 +96,9 @@ function ThirdPlaceTable({
                   {r.group}
                 </span>
               </div>
+              <span className="text-right text-sm tabular-nums text-white/60">
+                {r.played}
+              </span>
               <span className="text-right text-sm font-bold tabular-nums text-[color:var(--color-gold)]">
                 {r.points}
               </span>
@@ -156,8 +140,6 @@ export default async function BracketPage() {
     );
   }
 
-  const grouped = groupByDate(round32);
-
   // Best third-placed teams ranked head-to-head. The number that actually
   // qualify equals the count of third-place slots in the Round of 32 bracket.
   const thirdRanking = getThirdPlaceRanking(standings);
@@ -177,26 +159,17 @@ export default async function BracketPage() {
         </p>
       </div>
 
-      <div className="space-y-8">
-        {[...grouped.entries()].map(([dateKey, dayMatches]) => (
-          <div key={dateKey}>
-            <h2 className="mb-3 text-xs font-bold uppercase tracking-widest text-[color:var(--color-gold)]">
-              {formatDate(dateKey)}
-            </h2>
-            <div className="space-y-2">
-              {dayMatches.map((m) => (
-                <div
-                  key={`${m.a.code}-${m.b.code}`}
-                  className="glass grid grid-cols-[1fr_auto_1fr] items-center gap-3 rounded-2xl px-5 py-4"
-                >
-                  <Side slot={m.a} align="right" />
-                  <span className="text-xs font-bold uppercase tracking-wider text-white/30">
-                    vs
-                  </span>
-                  <Side slot={m.b} align="left" />
-                </div>
-              ))}
-            </div>
+      <div className="space-y-2">
+        {round32.map((m) => (
+          <div
+            key={`${m.a.code}-${m.b.code}`}
+            className="glass grid grid-cols-[1fr_auto_1fr] items-center gap-3 rounded-2xl px-5 py-4"
+          >
+            <Side slot={m.a} align="right" />
+            <span className="text-xs font-bold uppercase tracking-wider text-white/30">
+              vs
+            </span>
+            <Side slot={m.b} align="left" />
           </div>
         ))}
       </div>
