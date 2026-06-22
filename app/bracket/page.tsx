@@ -20,6 +20,29 @@ function Flag({ countryCode }: { countryCode?: string }) {
   );
 }
 
+function VerifiedBadge() {
+  return (
+    <svg
+      className="h-4 w-4 shrink-0 text-[color:var(--color-gold)]"
+      viewBox="0 0 24 24"
+      fill="currentColor"
+      aria-label="Qualification confirmed"
+      role="img"
+    >
+      <title>Qualification confirmed</title>
+      <path d="M12 2l2.4 1.8 3-.2 1 2.8 2.6 1.5-1 2.8 1 2.8-2.6 1.5-1 2.8-3-.2L12 22l-2.4-1.8-3 .2-1-2.8L3 13.6l1-2.8-1-2.8L5.6 6.5l1-2.8 3 .2L12 2z" />
+      <path
+        d="M8.5 12.2l2.4 2.4 4.6-4.8"
+        fill="none"
+        stroke="#000"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 function Side({ slot, align }: { slot: BracketSlot; align: "left" | "right" }) {
   const thirdFlags = slot.groupCountryCodes ?? [];
   return (
@@ -35,6 +58,7 @@ function Side({ slot, align }: { slot: BracketSlot; align: "left" | "right" }) {
             <span className="truncate font-semibold text-white">
               {slot.teamName}
             </span>
+            {slot.clinched && <VerifiedBadge />}
           </>
         ) : thirdFlags.length > 0 ? (
           // Best third-placed qualifiers: show each group's current third-placed
@@ -156,6 +180,10 @@ export default async function BracketPage() {
           Group winners and runners-up are projected from current standings and
           will change as the group stage plays out. Third-placed qualifiers are
           shown as their group set until FIFA assigns them.
+        </p>
+        <p className="mt-2 flex items-center gap-1.5 text-xs text-white/40">
+          <VerifiedBadge />
+          marks teams that have clinched qualification to the knockouts.
         </p>
       </div>
 

@@ -965,12 +965,16 @@ export function getStatLeaders(
       ascending?: boolean;
       includeZero?: boolean;
       filter?: (s: PlayerTournamentStats) => boolean;
+      // Tiebreak on games played: "asc" ranks fewer games first (more
+      // impressive for the same tally), "desc" ranks more games first.
+      playedTiebreak?: "asc" | "desc";
     } = {},
   ): StatLeader[] => {
     const {
       ascending = false,
       includeZero = false,
       filter = () => true,
+      playedTiebreak,
     } = opts;
     return (
       allStats
@@ -984,10 +988,15 @@ export function getStatLeaders(
           value: pick(s),
           matchesPlayed: s.matchesPlayed,
         }))
-        // Ties broken alphabetically for a stable order.
+        // Ties broken by games played (when requested), then alphabetically.
         .sort(
           (a, b) =>
             (ascending ? a.value - b.value : b.value - a.value) ||
+            (playedTiebreak === "asc"
+              ? a.matchesPlayed - b.matchesPlayed
+              : playedTiebreak === "desc"
+                ? b.matchesPlayed - a.matchesPlayed
+                : 0) ||
             a.name.localeCompare(b.name),
         )
         .slice(0, limit)
@@ -995,15 +1004,18 @@ export function getStatLeaders(
   };
 
   return {
-    scorers: board((s) => s.totals.goals),
-    yellowCards: board((s) => s.totals.yellowCards),
-    redCards: board((s) => s.totals.redCards),
+    // Fewer games first among equal scorers.
+    scorers: board((s) => s.totals.goals, { playedTiebreak: "asc" }),
+    yellowCards: board((s) => s.totals.yellowCards, { playedTiebreak: "asc" }),
+    redCards: board((s) => s.totals.redCards, { playedTiebreak: "asc" }),
     // Fewest conceded first; only keepers who have actually played, and a
-    // clean sheet (0 conceded) is the best result so zeros are included.
+    // clean sheet (0 conceded) is the best result so zeros are included. More
+    // games first among equal conceded (kept it tight over more matches).
     gkConceded: board((s) => s.totals.goalsConceded, {
       ascending: true,
       includeZero: true,
       filter: (s) => s.player.position === "GK" && s.matchesPlayed > 0,
+      playedTiebreak: "desc",
     }),
   };
 }
@@ -1083,9 +1095,14 @@ export function getTeamStatLeaders(
   const entries = [...team.entries()];
   const board = (
     pick: (a: Agg) => number,
-    opts: { ascending?: boolean; includeZero?: boolean } = {},
+    opts: {
+      ascending?: boolean;
+      includeZero?: boolean;
+      // Tiebreak on games played: "asc" ranks fewer games first, "desc" more.
+      playedTiebreak?: "asc" | "desc";
+    } = {},
   ): TeamStatLeader[] => {
-    const { ascending = false, includeZero = false } = opts;
+    const { ascending = false, includeZero = false, playedTiebreak } = opts;
     return entries
       .filter(([, a]) => includeZero || pick(a) > 0)
       .map(([teamId, a]) => ({
@@ -1098,17 +1115,28 @@ export function getTeamStatLeaders(
       .sort(
         (x, y) =>
           (ascending ? x.value - y.value : y.value - x.value) ||
+          (playedTiebreak === "asc"
+            ? x.matchesPlayed - y.matchesPlayed
+            : playedTiebreak === "desc"
+              ? y.matchesPlayed - x.matchesPlayed
+              : 0) ||
           x.teamName.localeCompare(y.teamName),
       )
       .slice(0, limit);
   };
 
   return {
-    scorers: board((a) => a.scored),
-    yellowCards: board((a) => a.yellow),
-    redCards: board((a) => a.red),
+    // Fewer games first among equal tallies (cards/goals).
+    scorers: board((a) => a.scored, { playedTiebreak: "asc" }),
+    yellowCards: board((a) => a.yellow, { playedTiebreak: "asc" }),
+    redCards: board((a) => a.red, { playedTiebreak: "asc" }),
     // Fewest conceded first; teams that have played are all eligible (0 = best).
-    conceded: board((a) => a.conceded, { ascending: true, includeZero: true }),
+    // More games first among equal conceded.
+    conceded: board((a) => a.conceded, {
+      ascending: true,
+      includeZero: true,
+      playedTiebreak: "desc",
+    }),
   };
 }
 
@@ -3025,6 +3053,10 @@ export interface StandingRow {
   goalsAgainst: number;
   goalDiff: number;
   points: number;
+  // FIFA's qualification verdict for this team in its group. "ConfirmedQualified"
+  // means the team has clinched a knockout spot (other values: "CouldQualify",
+  // "Eliminated", "Undefined").
+  qualificationStatus: string;
 }
 
 // Current group standings keyed by group letter ("A".."L").
@@ -3066,6 +3098,7 @@ export async function fetchStandings(
         goalsAgainst,
         goalDiff: Number(r.GoalsDiference ?? goalsFor - goalsAgainst) || 0,
         points: Number(r.Points) || 0,
+        qualificationStatus: String(r.QualificationStatus ?? "Undefined"),
       });
     }
     for (const letter of Object.keys(byGroup))
@@ -3083,6 +3116,9 @@ export interface BracketSlot {
   teamName?: string;
   countryCode?: string;
   played?: number;
+  // True when FIFA has confirmed this team's knockout qualification, so the
+  // bracket can mark it as verified rather than merely projected.
+  clinched?: boolean;
   // For unresolved third-placed slots: the country code of each group's
   // current third-placed team, so the bracket can show flags instead of text.
   groupCountryCodes?: string[];
@@ -3116,6 +3152,7 @@ function resolveSlot(
           teamName: row.teamName,
           countryCode: row.countryCode,
           played: row.played,
+          clinched: row.qualificationStatus === "ConfirmedQualified",
         }
       : { code, label, resolved: false };
   }
