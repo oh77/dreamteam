@@ -13,7 +13,7 @@ const primary = [
 ];
 const rest = [
   { href: "/upcoming-games", label: "Upcoming" },
-  { href: "/bracket", label: "Bracket" },
+  { href: "/third-place", label: "3rd Place" },
   { href: "/players", label: "Players" },
   { href: "/stats", label: "Stats" },
   { href: "/clubs", label: "Clubs" },

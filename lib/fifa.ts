@@ -31,7 +31,11 @@ export interface MatchInfo {
   matchMinute: string | null;
   date: string | null;
   stageName: string | null;
-  // Knockout bracket slots, e.g. "1F" / "2C" / "3ABCDF" (null for group games).
+  // Sequential fixture number (1..104). Knockout placeholders reference these,
+  // e.g. a Round-of-16 slot "W73" means "winner of match number 73".
+  matchNumber: number | null;
+  // Knockout bracket slots, e.g. "1F" / "2C" / "3ABCDF" for the Round of 32, or
+  // "W73" (winner of match 73) for later rounds (null for group games).
   placeholderA: string | null;
   placeholderB: string | null;
 }
@@ -304,6 +308,7 @@ async function fetchAllMatches(): Promise<MatchInfo[]> {
         matchMinute: live ? (m.MatchTime ?? null) : null,
         date: m.Date ?? m.LocalDate ?? null,
         stageName: localName(m.StageName) || null,
+        matchNumber: Number(m.MatchNumber) || null,
         placeholderA: m.PlaceHolderA || null,
         placeholderB: m.PlaceHolderB || null,
       });
@@ -3124,53 +3129,6 @@ export interface BracketSlot {
   groupCountryCodes?: string[];
 }
 
-export interface BracketMatch {
-  date: string | null;
-  a: BracketSlot;
-  b: BracketSlot;
-}
-
-function resolveSlot(
-  code: string | null,
-  standings: Record<string, StandingRow[]>,
-): BracketSlot {
-  if (!code) return { code: "", label: "TBD", resolved: false };
-  const m = code.match(/^(\d)([A-Z]+)$/i);
-  if (!m) return { code, label: code, resolved: false };
-  const rank = Number(m[1]);
-  const groups = m[2].toUpperCase();
-
-  // Group winners / runners-up resolve to the team currently in that position.
-  if ((rank === 1 || rank === 2) && groups.length === 1) {
-    const label = `${rank === 1 ? "Winner" : "Runner-up"} ${groups}`;
-    const row = standings[groups]?.find((r) => r.position === rank);
-    return row
-      ? {
-          code,
-          label,
-          resolved: true,
-          teamName: row.teamName,
-          countryCode: row.countryCode,
-          played: row.played,
-          clinched: row.qualificationStatus === "ConfirmedQualified",
-        }
-      : { code, label, resolved: false };
-  }
-  // Best third-placed qualifiers: FIFA assigns these via a fixed table once the
-  // group stage finishes, so the matchup stays unresolved. Surface the current
-  // third-placed team of each candidate group so the bracket can show flags.
-  const groupCountryCodes = groups
-    .split("")
-    .map((g) => standings[g]?.find((r) => r.position === 3)?.countryCode)
-    .filter((c): c is string => Boolean(c));
-  return {
-    code,
-    label: `3rd ${groups.split("").join("/")}`,
-    resolved: false,
-    groupCountryCodes,
-  };
-}
-
 export interface ThirdPlaceRow extends StandingRow {
   group: string;
 }
@@ -3193,24 +3151,6 @@ export function getThirdPlaceRanking(
         b.goalDiff - a.goalDiff ||
         b.goalsFor - a.goalsFor,
     );
-}
-
-export function getRound32(
-  matches: MatchInfo[],
-  standings: Record<string, StandingRow[]>,
-): BracketMatch[] {
-  return matches
-    .filter(
-      (m) =>
-        /round of 32/i.test(m.stageName ?? "") &&
-        (m.placeholderA || m.placeholderB),
-    )
-    .sort((a, b) => (a.date ?? "").localeCompare(b.date ?? ""))
-    .map((m) => ({
-      date: m.date,
-      a: resolveSlot(m.placeholderA, standings),
-      b: resolveSlot(m.placeholderB, standings),
-    }));
 }
 
 // ---------------------------------------------------------------------------

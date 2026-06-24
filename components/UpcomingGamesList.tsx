@@ -1,7 +1,13 @@
 "use client";
 
 import { useState } from "react";
-import type { BroadcastSource, MatchInfo, StandingRow } from "@/lib/fifa";
+import type {
+  BracketSlot,
+  BroadcastSource,
+  MatchInfo,
+  StandingRow,
+} from "@/lib/fifa";
+import { resolveSlot } from "@/lib/bracket";
 
 // All kickoff times are shown in Central European Time for the Swedish audience.
 const CET_TZ = "Europe/Stockholm";
@@ -50,6 +56,42 @@ function isTeamSet(teamId: string, teamName: string): boolean {
   return Boolean(teamId) && teamName !== "Unknown";
 }
 
+// True when FIFA has confirmed this team's knockout qualification, mirroring the
+// bracket page's "clinched" badge. Looked up via the team's group standing.
+function isClinched(
+  teamId: string,
+  standings: Record<string, StandingRow[]>,
+  teamToGroup: Record<string, string>,
+): boolean {
+  const letter = teamToGroup[teamId];
+  if (!letter) return false;
+  const row = standings[letter]?.find((r) => r.teamId === teamId);
+  return row?.qualificationStatus === "ConfirmedQualified";
+}
+
+// Later knockout rounds reference earlier fixtures: "W73" means "winner of match
+// number 73". Returns that match number, or null for group-style placeholders.
+function winnerMatchNumber(code: string | null): number | null {
+  const m = code?.match(/^W(\d+)$/i);
+  return m ? Number(m[1]) : null;
+}
+
+// For a "winner of match N" placeholder, the two country codes contesting that
+// match — but only once both its teams are actually set, so we show the real
+// pair of possible qualifiers rather than nested placeholders.
+function winnerFlags(
+  code: string | null,
+  allMatches: MatchInfo[],
+): string[] | null {
+  const num = winnerMatchNumber(code);
+  if (num === null) return null;
+  const src = allMatches.find((m) => m.matchNumber === num);
+  if (!src) return null;
+  if (!isTeamSet(src.homeTeamId, src.homeTeamName)) return null;
+  if (!isTeamSet(src.awayTeamId, src.awayTeamName)) return null;
+  return [src.homeCountryCode, src.awayCountryCode];
+}
+
 // Turn a knockout placeholder code into its display form: "1F"/"2F" stay as-is,
 // while a third-place set like "3ABCDE" becomes "3A/B/C/D/E".
 function formatPlaceholder(code: string | null): string {
@@ -94,6 +136,142 @@ function Flag({
       alt=""
       className={`shrink-0 rounded-sm object-cover ${className}`}
     />
+  );
+}
+
+// Gold "verified" badge marking teams that have clinched knockout qualification
+// — same icon used on the bracket page.
+function VerifiedBadge() {
+  return (
+    <svg
+      className="h-4 w-4 shrink-0 text-[color:var(--color-gold)]"
+      viewBox="0 0 24 24"
+      fill="currentColor"
+      aria-label="Qualification confirmed"
+      role="img"
+    >
+      <title>Qualification confirmed</title>
+      <path d="M12 2l2.4 1.8 3-.2 1 2.8 2.6 1.5-1 2.8 1 2.8-2.6 1.5-1 2.8-3-.2L12 22l-2.4-1.8-3 .2-1-2.8L3 13.6l1-2.8-1-2.8L5.6 6.5l1-2.8 3 .2L12 2z" />
+      <path
+        d="M8.5 12.2l2.4 2.4 4.6-4.8"
+        fill="none"
+        stroke="#000"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+// Tentative marker for slots not yet officially assigned by FIFA: a trending
+// line, signalling the team is projected from current standings and may change.
+function ProjectedBadge() {
+  return (
+    <svg
+      className="h-3.5 w-3.5 shrink-0 text-white/40"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.5"
+      aria-label="Projected from current standings"
+      role="img"
+    >
+      <title>Projected</title>
+      <path
+        d="M3 17l6-6 4 4 8-8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path d="M14 7h7v7" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+// One side of a fixture's header. Shows the officially-assigned team when FIFA
+// has set it; otherwise the projected team (group winner/runner-up), or a set of
+// candidate flags (best third-placed groups, or the two contenders of a "winner
+// of match N" slot), all marked as projected.
+function TeamSide({
+  align,
+  set,
+  teamName,
+  countryCode,
+  placeholder,
+  clinched,
+  projection,
+  candidateFlags,
+}: {
+  align: "left" | "right";
+  set: boolean;
+  teamName: string;
+  countryCode: string;
+  placeholder: string;
+  clinched: boolean;
+  projection: BracketSlot | null;
+  candidateFlags: string[] | null;
+}) {
+  const reverse = align === "right";
+  // Home side hugs the centre line: reverse so the flag lands innermost and the
+  // badge on the outer edge. In a reversed row the default flex-start already
+  // packs items to the right, so no justify override is needed.
+  const containerCls = `flex flex-1 items-center gap-2 ${
+    reverse ? "flex-row-reverse text-right" : ""
+  }`;
+
+  // 1. Official team assigned by FIFA.
+  if (set) {
+    return (
+      <div className={containerCls}>
+        <Flag countryCode={countryCode} />
+        <span className="min-w-0 truncate text-sm font-semibold text-white sm:text-base">
+          {teamName}
+        </span>
+        {clinched && <VerifiedBadge />}
+      </div>
+    );
+  }
+
+  // 2. Group winner / runner-up projected from current standings.
+  if (projection?.resolved) {
+    return (
+      <div className={containerCls}>
+        <Flag countryCode={projection.countryCode} />
+        <span className="min-w-0 truncate text-sm font-semibold italic text-white/70 sm:text-base">
+          {projection.teamName}
+        </span>
+        <ProjectedBadge />
+      </div>
+    );
+  }
+
+  // 3. A set of candidate flags, shown without names: either the best third-placed
+  // groups, or the two teams contesting a "winner of match N" slot.
+  const flags = candidateFlags ?? projection?.groupCountryCodes ?? [];
+  if (flags.length > 0) {
+    return (
+      <div className={containerCls}>
+        <div
+          className={`flex min-w-0 flex-wrap items-center gap-1 ${
+            reverse ? "justify-end" : ""
+          }`}
+        >
+          {flags.map((c) => (
+            <Flag key={c} countryCode={c} className="h-4 w-4" />
+          ))}
+        </div>
+        <ProjectedBadge />
+      </div>
+    );
+  }
+
+  // 4. Nothing to project yet — fall back to the raw placeholder code.
+  return (
+    <div className={containerCls}>
+      <span className="min-w-0 truncate text-sm font-semibold italic text-white/40 sm:text-base">
+        {placeholder}
+      </span>
+    </div>
   );
 }
 
@@ -303,6 +481,24 @@ function GameCard({
   const awaySet = isTeamSet(match.awayTeamId, match.awayTeamName);
   const homePlaceholder = formatPlaceholder(match.placeholderA);
   const awayPlaceholder = formatPlaceholder(match.placeholderB);
+  const homeClinched =
+    homeSet && isClinched(match.homeTeamId, standings, teamToGroup);
+  const awayClinched =
+    awaySet && isClinched(match.awayTeamId, standings, teamToGroup);
+  // For unset knockout slots, project the team from the current standings.
+  const homeProjection = homeSet
+    ? null
+    : resolveSlot(match.placeholderA, standings);
+  const awayProjection = awaySet
+    ? null
+    : resolveSlot(match.placeholderB, standings);
+  // For "winner of match N" slots, the two flags of that match once it's set.
+  const homeCandidateFlags = homeSet
+    ? null
+    : winnerFlags(match.placeholderA, allMatches);
+  const awayCandidateFlags = awaySet
+    ? null
+    : winnerFlags(match.placeholderB, allMatches);
 
   return (
     <div className="glass rounded-2xl px-5 py-4">
@@ -314,14 +510,16 @@ function GameCard({
       >
         <div className="flex items-center justify-between gap-3">
           {/* Home team */}
-          <div className="flex flex-1 items-center justify-end gap-2 text-right">
-            <span
-              className={`min-w-0 truncate text-sm sm:text-base ${homeSet ? "font-semibold text-white" : "font-semibold italic text-white/40"}`}
-            >
-              {homeSet ? match.homeTeamName : homePlaceholder}
-            </span>
-            {homeSet && <Flag countryCode={match.homeCountryCode} />}
-          </div>
+          <TeamSide
+            align="right"
+            set={homeSet}
+            teamName={match.homeTeamName}
+            countryCode={match.homeCountryCode}
+            placeholder={homePlaceholder}
+            clinched={homeClinched}
+            projection={homeProjection}
+            candidateFlags={homeCandidateFlags}
+          />
 
           {/* Live score + minute, or VS + kickoff time (CET) */}
           <div className="flex flex-col items-center gap-0.5 min-w-[72px]">
@@ -353,14 +551,16 @@ function GameCard({
           </div>
 
           {/* Away team */}
-          <div className="flex flex-1 items-center gap-2">
-            {awaySet && <Flag countryCode={match.awayCountryCode} />}
-            <span
-              className={`min-w-0 truncate text-sm sm:text-base ${awaySet ? "font-semibold text-white" : "font-semibold italic text-white/40"}`}
-            >
-              {awaySet ? match.awayTeamName : awayPlaceholder}
-            </span>
-          </div>
+          <TeamSide
+            align="left"
+            set={awaySet}
+            teamName={match.awayTeamName}
+            countryCode={match.awayCountryCode}
+            placeholder={awayPlaceholder}
+            clinched={awayClinched}
+            projection={awayProjection}
+            candidateFlags={awayCandidateFlags}
+          />
         </div>
 
         <div className="mt-2 flex items-center justify-center gap-2">
@@ -453,8 +653,42 @@ export default function UpcomingGamesList({
     }
   }
 
+  const anyClinched = Object.values(standings).some((rows) =>
+    rows.some((r) => r.qualificationStatus === "ConfirmedQualified"),
+  );
+  const anyProjected = upcoming.some((m) =>
+    (
+      [
+        [m.placeholderA, isTeamSet(m.homeTeamId, m.homeTeamName)],
+        [m.placeholderB, isTeamSet(m.awayTeamId, m.awayTeamName)],
+      ] as [string | null, boolean][]
+    ).some(([code, set]) => {
+      if (set) return false;
+      const slot = resolveSlot(code, standings);
+      if (slot.resolved || (slot.groupCountryCodes?.length ?? 0) > 0)
+        return true;
+      return winnerFlags(code, matches) !== null;
+    }),
+  );
+
   return (
     <div className="space-y-8">
+      {(anyClinched || anyProjected) && (
+        <div className="space-y-1.5">
+          {anyClinched && (
+            <p className="flex items-center gap-1.5 text-xs text-white/40">
+              <VerifiedBadge />
+              marks teams that have clinched qualification to the next stage.
+            </p>
+          )}
+          {anyProjected && (
+            <p className="flex items-center gap-1.5 text-xs text-white/40">
+              <ProjectedBadge />
+              marks projected teams not yet confirmed.
+            </p>
+          )}
+        </div>
+      )}
       {groups.map((g) => (
         <div key={g.key}>
           <h2 className="mb-3 text-xs font-bold uppercase tracking-widest text-[color:var(--color-gold)]">
