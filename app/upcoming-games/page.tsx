@@ -6,6 +6,7 @@ import {
   fetchSwedishBroadcasts,
   GROUP_STAGE_ROUNDS,
   getGroupGameNumbers,
+  getThirdPlaceRanking,
   runPipeline,
 } from "@/lib/fifa";
 
@@ -30,6 +31,17 @@ export default async function UpcomingGamesPage() {
   for (const [letter, rows] of Object.entries(standings)) {
     for (const r of rows as StandingRow[]) teamToGroup[r.teamId] = letter;
   }
+
+  // Country codes of the third-placed teams currently projected to qualify (the
+  // top N by FIFA's tiebreakers, where N is the number of "3…" Round-of-32
+  // slots). Used to dim the non-qualifying flags in third-place placeholders.
+  const thirdQualifyCount = matches
+    .filter((m) => /round of 32/i.test(m.stageName ?? ""))
+    .flatMap((m) => [m.placeholderA, m.placeholderB])
+    .filter((c) => c && /^3/.test(c)).length;
+  const qualifiedThirdCodes = getThirdPlaceRanking(standings)
+    .slice(0, thirdQualifyCount)
+    .map((r) => r.countryCode);
 
   if (upcoming.length === 0) {
     return (
@@ -68,6 +80,7 @@ export default async function UpcomingGamesPage() {
         groupStageRounds={GROUP_STAGE_ROUNDS}
         standings={standings}
         teamToGroup={teamToGroup}
+        qualifiedThirdCodes={qualifiedThirdCodes}
       />
     </div>
   );

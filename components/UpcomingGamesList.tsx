@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import type {
   BracketSlot,
   BroadcastSource,
@@ -201,6 +201,7 @@ function TeamSide({
   clinched,
   projection,
   candidateFlags,
+  qualifiedThird,
 }: {
   align: "left" | "right";
   set: boolean;
@@ -210,6 +211,7 @@ function TeamSide({
   clinched: boolean;
   projection: BracketSlot | null;
   candidateFlags: string[] | null;
+  qualifiedThird: Set<string>;
 }) {
   const reverse = align === "right";
   // Home side hugs the centre line: reverse so the flag lands innermost and the
@@ -246,21 +248,37 @@ function TeamSide({
   }
 
   // 3. A set of candidate flags, shown without names: either the best third-placed
-  // groups, or the two teams contesting a "winner of match N" slot.
+  // groups, or the two teams contesting a "winner of match N" slot. The winner
+  // pair is separated by a "/" divider to read as two distinct contenders; in a
+  // third-placed set, teams outside the current top-N qualifiers are dimmed.
   const flags = candidateFlags ?? projection?.groupCountryCodes ?? [];
   if (flags.length > 0) {
+    const isWinnerPair = candidateFlags != null;
     return (
       <div className={containerCls}>
         <div
-          className={`flex min-w-0 flex-wrap items-center gap-1 ${
-            reverse ? "justify-end" : ""
-          }`}
+          className={`flex min-w-0 flex-wrap items-center ${
+            isWinnerPair ? "gap-1.5" : "gap-1"
+          } ${reverse ? "justify-end" : ""}`}
         >
-          {flags.map((c) => (
-            <Flag key={c} countryCode={c} className="h-4 w-4" />
+          {flags.map((c, i) => (
+            <Fragment key={c}>
+              {isWinnerPair && i > 0 && (
+                <span className="text-xs font-bold text-white/30">/</span>
+              )}
+              <Flag
+                countryCode={c}
+                className={`h-4 w-4 ${
+                  !isWinnerPair &&
+                  qualifiedThird.size > 0 &&
+                  !qualifiedThird.has(c)
+                    ? "opacity-30"
+                    : ""
+                }`}
+              />
+            </Fragment>
           ))}
         </div>
-        <ProjectedBadge />
       </div>
     );
   }
@@ -466,6 +484,7 @@ function GameCard({
   allMatches,
   standings,
   teamToGroup,
+  qualifiedThird,
 }: {
   match: MatchInfo;
   groupGameNo?: number;
@@ -474,6 +493,7 @@ function GameCard({
   allMatches: MatchInfo[];
   standings: Record<string, StandingRow[]>;
   teamToGroup: Record<string, string>;
+  qualifiedThird: Set<string>;
 }) {
   const [open, setOpen] = useState(false);
 
@@ -519,6 +539,7 @@ function GameCard({
             clinched={homeClinched}
             projection={homeProjection}
             candidateFlags={homeCandidateFlags}
+            qualifiedThird={qualifiedThird}
           />
 
           {/* Live score + minute, or VS + kickoff time (CET) */}
@@ -560,6 +581,7 @@ function GameCard({
             clinched={awayClinched}
             projection={awayProjection}
             candidateFlags={awayCandidateFlags}
+            qualifiedThird={qualifiedThird}
           />
         </div>
 
@@ -632,6 +654,7 @@ export default function UpcomingGamesList({
   groupStageRounds,
   standings,
   teamToGroup,
+  qualifiedThirdCodes,
 }: {
   matches: MatchInfo[];
   upcoming: MatchInfo[];
@@ -640,7 +663,10 @@ export default function UpcomingGamesList({
   groupStageRounds: number;
   standings: Record<string, StandingRow[]>;
   teamToGroup: Record<string, string>;
+  qualifiedThirdCodes: string[];
 }) {
+  // Lookup for which third-placed teams are currently projected to qualify.
+  const qualifiedThird = new Set(qualifiedThirdCodes);
   // Group the sorted upcoming matches by their CET calendar day.
   const groups: { key: string; iso: string | null; items: MatchInfo[] }[] = [];
   for (const m of upcoming) {
@@ -656,19 +682,15 @@ export default function UpcomingGamesList({
   const anyClinched = Object.values(standings).some((rows) =>
     rows.some((r) => r.qualificationStatus === "ConfirmedQualified"),
   );
+  // The projected marker now appears only on named group winner/runner-up
+  // projections, so the legend tracks exactly those (resolved-from-standings).
   const anyProjected = upcoming.some((m) =>
     (
       [
         [m.placeholderA, isTeamSet(m.homeTeamId, m.homeTeamName)],
         [m.placeholderB, isTeamSet(m.awayTeamId, m.awayTeamName)],
       ] as [string | null, boolean][]
-    ).some(([code, set]) => {
-      if (set) return false;
-      const slot = resolveSlot(code, standings);
-      if (slot.resolved || (slot.groupCountryCodes?.length ?? 0) > 0)
-        return true;
-      return winnerFlags(code, matches) !== null;
-    }),
+    ).some(([code, set]) => !set && resolveSlot(code, standings).resolved),
   );
 
   return (
@@ -705,6 +727,7 @@ export default function UpcomingGamesList({
                 allMatches={matches}
                 standings={standings}
                 teamToGroup={teamToGroup}
+                qualifiedThird={qualifiedThird}
               />
             ))}
           </div>
