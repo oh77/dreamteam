@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import type { FormattedPlayer } from "@/lib/fifa";
+import { Flag } from "./Flag";
 import { PlayerBreakdownDialog } from "./PlayerBreakdownDialog";
 
 export function PitchCard({ player }: { player: FormattedPlayer }) {
@@ -26,17 +27,12 @@ export function PitchCard({ player }: { player: FormattedPlayer }) {
         <span className="text-[11px] font-semibold leading-tight text-white line-clamp-2 w-full">
           {player.name.split(" ").slice(-1)[0]}
         </span>
-        {player.countryCode ? (
-          <img
-            src={`https://api.fifa.com/api/v3/picture/flags-sq-2/${player.countryCode}`}
-            alt={player.team}
-            width={16}
-            height={16}
-            className="w-4 h-4 rounded-sm object-cover"
-          />
-        ) : (
-          <div className="w-4 h-4" />
-        )}
+        <Flag
+          countryCode={player.countryCode}
+          alt={player.team}
+          className="h-4 w-4"
+          placeholder
+        />
         <span
           className={`text-sm font-bold ${player.isCaptain ? "text-[color:var(--color-gold)]" : "text-white"}`}
         >

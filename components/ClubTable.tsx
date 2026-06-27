@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import type { ClubLineupPlayer, ClubTeam, Position } from "@/lib/fifa";
+import { Flag } from "./Flag";
 import { PlayerBreakdownDialog } from "./PlayerBreakdownDialog";
 
 const POSITIONS: Position[] = ["GK", "DEF", "MID", "ATT"];
@@ -18,19 +19,6 @@ function lastName(name: string): string {
   return parts.length > 1 ? parts.slice(1).join(" ") : name;
 }
 
-function flag(countryCode: string) {
-  if (!countryCode) return null;
-  return (
-    <img
-      src={`https://api.fifa.com/api/v3/picture/flags-sq-2/${countryCode}`}
-      alt=""
-      width={16}
-      height={16}
-      className="h-4 w-4 shrink-0 rounded-sm object-cover"
-    />
-  );
-}
-
 function ClubRow({ club, rank }: { club: ClubTeam; rank: number }) {
   const [open, setOpen] = useState(false);
   const [selected, setSelected] = useState<ClubLineupPlayer | null>(null);
@@ -45,7 +33,7 @@ function ClubRow({ club, rank }: { club: ClubTeam; rank: number }) {
         <span className="w-5 shrink-0 text-center text-xs font-black tabular-nums text-white/30">
           {rank}
         </span>
-        {flag(club.country)}
+        <Flag countryCode={club.country} className="h-4 w-4" />
         <span className="min-w-0 flex-1 truncate font-semibold text-white">
           {club.name}
         </span>
@@ -80,7 +68,7 @@ function ClubRow({ club, rank }: { club: ClubTeam; rank: number }) {
                       onClick={() => setSelected(p)}
                       className="inline-flex items-center gap-1.5 rounded-lg bg-white/5 px-2 py-1 text-xs transition-colors hover:bg-white/10"
                     >
-                      {flag(p.countryCode)}
+                      <Flag countryCode={p.countryCode} className="h-4 w-4" />
                       <span className="text-white/80">{lastName(p.name)}</span>
                       <span
                         className={`font-bold tabular-nums ${p.points > 0 ? "text-emerald-400" : p.points < 0 ? "text-red-400" : "text-white/30"}`}

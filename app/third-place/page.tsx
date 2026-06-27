@@ -1,19 +1,7 @@
 import { cacheLife, cacheTag } from "next/cache";
+import { Flag } from "@/components/Flag";
 import type { ThirdPlaceRow } from "@/lib/fifa";
 import { fetchStandings, getThirdPlaceRanking, runPipeline } from "@/lib/fifa";
-
-function Flag({ countryCode }: { countryCode?: string }) {
-  if (!countryCode) return null;
-  return (
-    <img
-      src={`https://api.fifa.com/api/v3/picture/flags-sq-2/${countryCode}`}
-      alt=""
-      width={20}
-      height={20}
-      className="h-5 w-5 shrink-0 rounded-sm object-cover"
-    />
-  );
-}
 
 function ThirdPlaceTable({
   rows,

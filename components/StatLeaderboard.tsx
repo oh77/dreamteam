@@ -1,22 +1,11 @@
+import { Flag } from "./Flag";
+
 export interface LeaderRow {
   id: string;
   name: string;
   countryCode: string;
   value: number;
   matchesPlayed: number;
-}
-
-function flag(countryCode: string) {
-  if (!countryCode) return <div className="h-4 w-4 shrink-0" />;
-  return (
-    <img
-      src={`https://api.fifa.com/api/v3/picture/flags-sq-2/${countryCode}`}
-      alt=""
-      width={16}
-      height={16}
-      className="h-4 w-4 shrink-0 rounded-sm object-cover"
-    />
-  );
 }
 
 const rankColor = (i: number) =>
@@ -62,7 +51,11 @@ export function StatLeaderboard({
               >
                 {i + 1}
               </span>
-              {flag(l.countryCode)}
+              <Flag
+                countryCode={l.countryCode}
+                className="h-4 w-4"
+                placeholder
+              />
               <span className="min-w-0 flex-1 truncate text-sm text-white/80">
                 {l.name}
               </span>

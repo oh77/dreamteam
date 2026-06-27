@@ -1,13 +1,14 @@
 "use client";
 
 import { Fragment, useState } from "react";
+import { resolveSlot } from "@/lib/bracket";
 import type {
   BracketSlot,
   BroadcastSource,
   MatchInfo,
   StandingRow,
 } from "@/lib/fifa";
-import { resolveSlot } from "@/lib/bracket";
+import { Flag } from "./Flag";
 
 // All kickoff times are shown in Central European Time for the Swedish audience.
 const CET_TZ = "Europe/Stockholm";
@@ -122,23 +123,6 @@ function byDate(a: MatchInfo, b: MatchInfo): number {
   return (a.date ?? "").localeCompare(b.date ?? "");
 }
 
-function Flag({
-  countryCode,
-  className = "h-5 w-5",
-}: {
-  countryCode?: string;
-  className?: string;
-}) {
-  if (!countryCode) return null;
-  return (
-    <img
-      src={`https://api.fifa.com/api/v3/picture/flags-sq-2/${countryCode}`}
-      alt=""
-      className={`shrink-0 rounded-sm object-cover ${className}`}
-    />
-  );
-}
-
 // Gold "verified" badge marking teams that have clinched knockout qualification
 // — same icon used on the bracket page.
 function VerifiedBadge() {
@@ -214,11 +198,15 @@ function TeamSide({
   qualifiedThird: Set<string>;
 }) {
   const reverse = align === "right";
-  // Home side hugs the centre line: reverse so the flag lands innermost and the
-  // badge on the outer edge. In a reversed row the default flex-start already
-  // packs items to the right, so no justify override is needed.
-  const containerCls = `flex flex-1 items-center gap-2 ${
-    reverse ? "flex-row-reverse text-right" : ""
+  // Mobile: flag centred above the name (matching the results card). Desktop:
+  // back to a single row that hugs the centre line — the home side reverses so
+  // its flag lands innermost, and the name group leads with the verified /
+  // projected icon in front of the team name.
+  const containerCls = `flex flex-1 min-w-0 flex-col items-center gap-1 text-center sm:flex-row sm:gap-2 ${
+    reverse ? "sm:justify-end sm:text-right" : "sm:justify-start sm:text-left"
+  }`;
+  const nameGroupCls = `flex min-w-0 items-center gap-1 ${
+    reverse ? "sm:order-first" : ""
   }`;
 
   // 1. Official team assigned by FIFA.
@@ -226,10 +214,12 @@ function TeamSide({
     return (
       <div className={containerCls}>
         <Flag countryCode={countryCode} />
-        <span className="min-w-0 truncate text-sm font-semibold text-white sm:text-base">
-          {teamName}
+        <span className={nameGroupCls}>
+          {clinched && <VerifiedBadge />}
+          <span className="min-w-0 break-words text-sm font-semibold leading-tight text-white sm:truncate sm:text-base">
+            {teamName}
+          </span>
         </span>
-        {clinched && <VerifiedBadge />}
       </div>
     );
   }
@@ -239,10 +229,12 @@ function TeamSide({
     return (
       <div className={containerCls}>
         <Flag countryCode={projection.countryCode} />
-        <span className="min-w-0 truncate text-sm font-semibold italic text-white/70 sm:text-base">
-          {projection.teamName}
+        <span className={nameGroupCls}>
+          <ProjectedBadge />
+          <span className="min-w-0 break-words text-sm font-semibold italic leading-tight text-white/70 sm:truncate sm:text-base">
+            {projection.teamName}
+          </span>
         </span>
-        <ProjectedBadge />
       </div>
     );
   }
@@ -286,7 +278,7 @@ function TeamSide({
   // 4. Nothing to project yet — fall back to the raw placeholder code.
   return (
     <div className={containerCls}>
-      <span className="min-w-0 truncate text-sm font-semibold italic text-white/40 sm:text-base">
+      <span className="min-w-0 break-words text-sm font-semibold italic leading-tight text-white/40 sm:truncate sm:text-base">
         {placeholder}
       </span>
     </div>

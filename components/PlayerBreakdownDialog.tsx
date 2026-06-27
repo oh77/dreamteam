@@ -1,5 +1,6 @@
 "use client";
 
+import { createPortal } from "react-dom";
 import type { PlayerTournamentStats, Position } from "@/lib/fifa";
 
 const posColor: Record<Position, string> = {
@@ -36,7 +37,13 @@ export function PlayerBreakdownDialog({
   player: BreakdownPlayer;
   onClose: () => void;
 }) {
-  return (
+  // Render into document.body so the fixed-position overlay escapes any
+  // ancestor that establishes a containing block for fixed elements (the club
+  // card's `glass` backdrop-filter does this in Safari, trapping the modal
+  // inside the card). SSR has no document, so render nothing until mounted.
+  if (typeof document === "undefined") return null;
+
+  return createPortal(
     <dialog
       open
       aria-modal="true"
@@ -117,7 +124,8 @@ export function PlayerBreakdownDialog({
                     Captain ×2
                   </span>
                   <span className="text-sm font-semibold text-[color:var(--color-gold)]">
-                    +{base}
+                    {base > 0 ? "+" : ""}
+                    {base}
                   </span>
                 </div>
               ) : null;
@@ -132,6 +140,7 @@ export function PlayerBreakdownDialog({
           Close
         </button>
       </form>
-    </dialog>
+    </dialog>,
+    document.body,
   );
 }

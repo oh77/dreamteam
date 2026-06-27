@@ -8,6 +8,7 @@ import type {
   MatchTimelineEntry,
   TimelineEntryKind,
 } from "@/lib/fifa";
+import { Flag } from "./Flag";
 
 type Side = "home" | "away" | "draw";
 
@@ -35,17 +36,11 @@ const outcomeChip: Record<"WIN" | "DRAW" | "LOSS", string> = {
   LOSS: "bg-red-500/20 text-red-300",
 };
 
+const FLAG_SIZE: Record<number, string> = { 4: "h-4 w-4", 5: "h-5 w-5" };
+
 function flagImg(countryCode: string, size = 5) {
-  if (!countryCode) return null;
-  const url = `https://api.fifa.com/api/v3/picture/flags-sq-2/${countryCode}`;
   return (
-    <img
-      src={url}
-      alt=""
-      width={size * 4}
-      height={size * 4}
-      className={`w-${size} h-${size} rounded-sm object-cover shrink-0`}
-    />
+    <Flag countryCode={countryCode} className={FLAG_SIZE[size] ?? "h-5 w-5"} />
   );
 }
 
