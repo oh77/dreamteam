@@ -15,14 +15,90 @@ function PitchRow({ players }: { players: FormattedPlayer[] }) {
 }
 
 interface Props {
-  teamStrict: SelectedTeam;
-  teamOpen: SelectedTeam;
+  teamStrict: SelectedTeam | null;
+  teamOpen: SelectedTeam | null;
+  altTeamStrict: SelectedTeam | null;
+  altTeamOpen: SelectedTeam | null;
+  primaryLabel: string;
+  altLabel: string;
   mode: "best" | "worst";
 }
 
-export function TeamPitchView({ teamStrict, teamOpen, mode }: Props) {
+export function TeamPitchView({
+  teamStrict,
+  teamOpen,
+  altTeamStrict,
+  altTeamOpen,
+  primaryLabel,
+  altLabel,
+  mode,
+}: Props) {
+  const [pool, setPool] = useState<"primary" | "alt">("primary");
   const [strict, setStrict] = useState(true);
-  const team = strict ? teamStrict : teamOpen;
+  const isBest = mode === "best";
+  const team =
+    pool === "primary"
+      ? strict
+        ? teamStrict
+        : teamOpen
+      : strict
+        ? altTeamStrict
+        : altTeamOpen;
+
+  return (
+    <>
+      {/* Pool toggle */}
+      <div className="mb-4 flex justify-center gap-1">
+        {(
+          [
+            { key: "primary", label: primaryLabel },
+            { key: "alt", label: altLabel },
+          ] as const
+        ).map(({ key, label }) => (
+          <button
+            key={key}
+            type="button"
+            onClick={() => setPool(key)}
+            className={`rounded-full px-3 py-1.5 text-sm font-medium transition-colors ${
+              pool === key
+                ? isBest
+                  ? "bg-[color:var(--color-gold)] text-black"
+                  : "bg-red-600 text-white"
+                : "bg-white/10 text-white/70 hover:bg-white/20"
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {team ? (
+        <TeamPitch
+          team={team}
+          mode={mode}
+          strict={strict}
+          setStrict={setStrict}
+        />
+      ) : (
+        <p className="py-16 text-center text-sm text-white/40">
+          Not enough players yet — no team has advanced from the group stage.
+        </p>
+      )}
+    </>
+  );
+}
+
+function TeamPitch({
+  team,
+  mode,
+  strict,
+  setStrict,
+}: {
+  team: SelectedTeam;
+  mode: "best" | "worst";
+  strict: boolean;
+  setStrict: (fn: (s: boolean) => boolean) => void;
+}) {
   const isBest = mode === "best";
 
   return (

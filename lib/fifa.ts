@@ -679,12 +679,24 @@ export async function runPipeline(): Promise<PipelineResult> {
 // Team selection
 // ---------------------------------------------------------------------------
 
+// Team IDs that have advanced from the group stage — i.e. nations confirmed
+// (verified, not placeholders) in a Round of 32 fixture.
+export function getAdvancedTeamIds(matches: MatchInfo[]): Set<string> {
+  const ids = new Set<string>();
+  for (const m of matches) {
+    if (!/round of 32/i.test(m.stageName ?? "")) continue;
+    if (m.homeTeamId && m.homeTeamName !== "Unknown") ids.add(m.homeTeamId);
+    if (m.awayTeamId && m.awayTeamName !== "Unknown") ids.add(m.awayTeamId);
+  }
+  return ids;
+}
+
 export function selectTeam(
   allStats: PlayerTournamentStats[],
   mode: "best" | "worst",
   teamCountry: Record<string, string> = {},
   maxPerTeam = Number.POSITIVE_INFINITY,
-): SelectedTeam {
+): SelectedTeam | null {
   const positions: Position[] = ["GK", "DEF", "MID", "ATT"];
   const counts: Record<Position, number> = { GK: 1, DEF: 3, MID: 4, ATT: 3 };
   const dir = mode === "best" ? "desc" : "asc";
@@ -716,6 +728,10 @@ export function selectTeam(
   }
 
   const allSelected = [...selectedByPos.values()].flat();
+  const [gk] = selectedByPos.get("GK") ?? [];
+
+  // Not enough players to field an XI (e.g. an empty/too-small candidate pool).
+  if (allSelected.length === 0 || !gk) return null;
 
   const captain = allSelected.reduce((best, cur) =>
     mode === "best"
@@ -747,7 +763,6 @@ export function selectTeam(
     };
   };
 
-  const [gk] = selectedByPos.get("GK") ?? [];
   const defenders = selectedByPos.get("DEF") ?? [];
   const midfielders = selectedByPos.get("MID") ?? [];
   const attackers = selectedByPos.get("ATT") ?? [];

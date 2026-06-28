@@ -1,14 +1,20 @@
 import { cacheLife, cacheTag } from "next/cache";
 import { TeamPitchView } from "@/components/TeamPitchView";
-import { runPipeline, selectTeam } from "@/lib/fifa";
+import { getAdvancedTeamIds, runPipeline, selectTeam } from "@/lib/fifa";
 
 export default async function BestTeamPage() {
   "use cache";
   cacheLife("minutes");
   cacheTag("fifa-pipeline");
-  const { players, teamCountry } = await runPipeline();
+  const { players, teamCountry, matches } = await runPipeline();
   const teamStrict = selectTeam(players, "best", teamCountry, 2);
   const teamOpen = selectTeam(players, "best", teamCountry);
+
+  // "Best of the rest" — players whose nation did not advance from stage 1.
+  const advanced = getAdvancedTeamIds(matches);
+  const eliminated = players.filter((p) => !advanced.has(p.player.teamId));
+  const altStrict = selectTeam(eliminated, "best", teamCountry, 2);
+  const altOpen = selectTeam(eliminated, "best", teamCountry);
 
   return (
     <div className="mx-auto max-w-3xl px-4 py-8">
@@ -20,7 +26,15 @@ export default async function BestTeamPage() {
           Optimal 1-3-4-3 formation by points scored
         </p>
       </div>
-      <TeamPitchView teamStrict={teamStrict} teamOpen={teamOpen} mode="best" />
+      <TeamPitchView
+        teamStrict={teamStrict}
+        teamOpen={teamOpen}
+        altTeamStrict={altStrict}
+        altTeamOpen={altOpen}
+        primaryLabel="All players"
+        altLabel="Didn't advance from stage 1"
+        mode="best"
+      />
     </div>
   );
 }

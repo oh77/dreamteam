@@ -1,14 +1,20 @@
 import { cacheLife, cacheTag } from "next/cache";
 import { TeamPitchView } from "@/components/TeamPitchView";
-import { runPipeline, selectTeam } from "@/lib/fifa";
+import { getAdvancedTeamIds, runPipeline, selectTeam } from "@/lib/fifa";
 
 export default async function WorstTeamPage() {
   "use cache";
   cacheLife("minutes");
   cacheTag("fifa-pipeline");
-  const { players, teamCountry } = await runPipeline();
+  const { players, teamCountry, matches } = await runPipeline();
   const teamStrict = selectTeam(players, "worst", teamCountry, 2);
   const teamOpen = selectTeam(players, "worst", teamCountry);
+
+  // Worst among nations that actually advanced from stage 1.
+  const advanced = getAdvancedTeamIds(matches);
+  const advancedPlayers = players.filter((p) => advanced.has(p.player.teamId));
+  const altStrict = selectTeam(advancedPlayers, "worst", teamCountry, 2);
+  const altOpen = selectTeam(advancedPlayers, "worst", teamCountry);
 
   return (
     <div className="mx-auto max-w-3xl px-4 py-8">
@@ -20,7 +26,15 @@ export default async function WorstTeamPage() {
           Hall of Shame · The worst of the worst
         </p>
       </div>
-      <TeamPitchView teamStrict={teamStrict} teamOpen={teamOpen} mode="worst" />
+      <TeamPitchView
+        teamStrict={teamStrict}
+        teamOpen={teamOpen}
+        altTeamStrict={altStrict}
+        altTeamOpen={altOpen}
+        primaryLabel="All players"
+        altLabel="Advanced from stage 1"
+        mode="worst"
+      />
     </div>
   );
 }
