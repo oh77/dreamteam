@@ -376,11 +376,19 @@ export function MatchResultCard({ match }: { match: MatchInfo }) {
       {/* Expanded dream-team points */}
       {open && (
         <div className="border-t border-white/10 px-5 py-4">
-          {match.stageName && (
+          {(match.stageName || match.venue) && (
             <div className="mb-3 text-center">
-              <span className="text-[10px] font-medium uppercase tracking-widest text-white/30">
-                {match.stageName}
-              </span>
+              {match.stageName && (
+                <span className="text-[10px] font-medium uppercase tracking-widest text-white/30">
+                  {match.stageName}
+                </span>
+              )}
+              {match.venue && (
+                <div className="mt-1 text-[11px] text-white/40">
+                  {match.venue}
+                  {match.city && `, ${match.city}`}
+                </div>
+              )}
             </div>
           )}
 

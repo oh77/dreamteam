@@ -607,30 +607,38 @@ function GameCard({
       <SwedishBroadcasters sources={sources} />
 
       {open && (
-        <div className="mt-4 grid grid-cols-2 divide-x divide-white/10 border-t border-white/10 pt-4">
-          <div className="pr-2">
-            <TeamColumn
-              teamId={match.homeTeamId}
-              teamName={match.homeTeamName}
-              countryCode={match.homeCountryCode}
-              placeholder={homePlaceholder}
-              currentMatchId={match.matchId}
-              allMatches={allMatches}
-              standings={standings}
-              teamToGroup={teamToGroup}
-            />
-          </div>
-          <div className="pl-2">
-            <TeamColumn
-              teamId={match.awayTeamId}
-              teamName={match.awayTeamName}
-              countryCode={match.awayCountryCode}
-              placeholder={awayPlaceholder}
-              currentMatchId={match.matchId}
-              allMatches={allMatches}
-              standings={standings}
-              teamToGroup={teamToGroup}
-            />
+        <div className="mt-4 border-t border-white/10 pt-4">
+          {match.venue && (
+            <div className="mb-3 text-center text-[11px] text-white/40">
+              {match.venue}
+              {match.city && `, ${match.city}`}
+            </div>
+          )}
+          <div className="grid grid-cols-2 divide-x divide-white/10">
+            <div className="pr-2">
+              <TeamColumn
+                teamId={match.homeTeamId}
+                teamName={match.homeTeamName}
+                countryCode={match.homeCountryCode}
+                placeholder={homePlaceholder}
+                currentMatchId={match.matchId}
+                allMatches={allMatches}
+                standings={standings}
+                teamToGroup={teamToGroup}
+              />
+            </div>
+            <div className="pl-2">
+              <TeamColumn
+                teamId={match.awayTeamId}
+                teamName={match.awayTeamName}
+                countryCode={match.awayCountryCode}
+                placeholder={awayPlaceholder}
+                currentMatchId={match.matchId}
+                allMatches={allMatches}
+                standings={standings}
+                teamToGroup={teamToGroup}
+              />
+            </div>
           </div>
         </div>
       )}

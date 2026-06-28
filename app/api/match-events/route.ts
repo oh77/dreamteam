@@ -38,6 +38,8 @@ export async function GET(request: NextRequest) {
     matchMinute: null,
     date: null,
     stageName: null,
+    venue: null,
+    city: null,
     matchNumber: null,
     placeholderA: null,
     placeholderB: null,

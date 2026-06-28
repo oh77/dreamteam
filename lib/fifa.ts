@@ -31,6 +31,9 @@ export interface MatchInfo {
   matchMinute: string | null;
   date: string | null;
   stageName: string | null;
+  // Stadium name and host city, e.g. "Mexico City Stadium" / "Mexico City".
+  venue: string | null;
+  city: string | null;
   // Sequential fixture number (1..104). Knockout placeholders reference these,
   // e.g. a Round-of-16 slot "W73" means "winner of match number 73".
   matchNumber: number | null;
@@ -185,6 +188,15 @@ function localName(
   );
 }
 
+// Like localName but returns null (not "Unknown") for missing data, for
+// optional fields such as venue/city that may be absent on some matches.
+function optionalLocalName(
+  names: Array<{ Locale: string; Description: string }> | string | undefined,
+): string | null {
+  if (!names) return null;
+  return localName(names);
+}
+
 function mapPosition(pos: number | string | undefined): Position {
   if (pos === 0 || pos === "GKP" || pos === "Goalkeeper") return "GK";
   if (pos === 1 || pos === "DEF" || pos === "Defender") return "DEF";
@@ -308,6 +320,8 @@ async function fetchAllMatches(): Promise<MatchInfo[]> {
         matchMinute: live ? (m.MatchTime ?? null) : null,
         date: m.Date ?? m.LocalDate ?? null,
         stageName: localName(m.StageName) || null,
+        venue: optionalLocalName(m.Stadium?.Name),
+        city: optionalLocalName(m.Stadium?.CityName),
         matchNumber: Number(m.MatchNumber) || null,
         placeholderA: m.PlaceHolderA || null,
         placeholderB: m.PlaceHolderB || null,
