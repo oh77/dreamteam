@@ -66,6 +66,7 @@ export interface TimelineEvent {
     | "YellowRedCard"
     | "SubstituteIn"
     | "SubstituteOut"
+    | "PenaltyMissed"
     | "Unknown";
   playerId: string;
   teamId: string;
@@ -76,6 +77,9 @@ export interface TimelineEvent {
   subInId?: string;
   // Goal scored from a penalty.
   penalty?: boolean;
+  // Penalty shoot-out kick (Period 11). Decides the tie but never counts as a
+  // goal for scoring; surfaced only in the events view after the regular feed.
+  shootout?: boolean;
 }
 
 export interface MatchLineup {
@@ -417,6 +421,21 @@ function parseEvent(e: any): TimelineEvent[] {
     )?.find((l) => l.Locale === "en-GB")?.Description ?? ""
   ).toLowerCase();
 
+  // Penalty shoot-out (Period 11): kicks decide the tie but are NOT goals for
+  // scoring — FIFA records them separately from open-play / extra-time goals.
+  // Keep them flagged so the events view can list them after the regular
+  // timeline; computeMatchStats ignores anything flagged `shootout`. A scored
+  // kick is Type 41 ("Penalty Goal"), a miss is Type 60 ("Penalty missed").
+  // In-play penalties (awarded for a foul in regular or extra time) sit in the
+  // match periods (3/5/7/9) and fall through to the normal handling below.
+  if (e.Period === 11) {
+    if (typeId === 41 || desc === "penalty goal")
+      return [{ ...base, type: "Goal", penalty: true, shootout: true }];
+    if (typeId === 60 || desc === "penalty missed")
+      return [{ ...base, type: "PenaltyMissed", shootout: true }];
+    return []; // shoot-out start/end markers, coin toss, etc.
+  }
+
   // Own goals come through as Type 34 / "Own goal" (not Type 0). Check first.
   if (typeId === 34 || desc.startsWith("own goal"))
     return [{ ...base, type: "OwnGoal" }];
@@ -530,7 +549,11 @@ function computeMatchStats(
 
     for (const player of squadByTeam.get(teamId) ?? []) {
       const playerEvents = events.filter((e) => e.playerId === player.id);
-      const goalsScored = playerEvents.filter((e) => e.type === "Goal").length;
+      // `!e.shootout` keeps penalty shoot-out kicks out of the goal tally — they
+      // decide the tie but are not goals for scoring.
+      const goalsScored = playerEvents.filter(
+        (e) => e.type === "Goal" && !e.shootout,
+      ).length;
       const ownGoals = playerEvents.filter((e) => e.type === "OwnGoal").length;
       const yellowCards = playerEvents.filter(
         (e) => e.type === "YellowCard" || e.type === "YellowRedCard",
@@ -3223,6 +3246,19 @@ export interface MatchTimelineEntry {
   penalty?: boolean;
 }
 
+// A single penalty shoot-out kick, in the order it was taken.
+export interface ShootoutKick {
+  side: "home" | "away";
+  player: string;
+  scored: boolean;
+}
+
+export interface ShootoutInfo {
+  homeScore: number; // penalties scored
+  awayScore: number;
+  kicks: ShootoutKick[];
+}
+
 export interface MatchEventSummary {
   homeOutcome: "WIN" | "DRAW" | "LOSS";
   awayOutcome: "WIN" | "DRAW" | "LOSS";
@@ -3232,6 +3268,8 @@ export interface MatchEventSummary {
   awayResultPoints: number;
   players: MatchPlayerPoints[];
   timeline: MatchTimelineEntry[];
+  // Present only for matches decided by a shoot-out; rendered after the timeline.
+  shootout?: ShootoutInfo;
 }
 
 export async function getMatchEventSummary(
@@ -3330,6 +3368,7 @@ export async function getMatchEventSummary(
 
   const timeline: MatchTimelineEntry[] = [];
   for (const e of events) {
+    if (e.shootout) continue; // shoot-out kicks render in their own block below
     if (e.type === "SubstituteIn") continue; // handled alongside SubstituteOut
     if (e.type === "SubstituteOut") {
       timeline.push({
@@ -3364,6 +3403,27 @@ export async function getMatchEventSummary(
   }
   timeline.sort((a, b) => a.minute - b.minute);
 
+  // Shoot-out kicks arrive in the feed in kick order (teams alternate); keep
+  // that order so the dots read left-to-right as the shoot-out unfolded.
+  const shootoutKicks: ShootoutKick[] = events
+    .filter(
+      (e) => e.shootout && (e.type === "Goal" || e.type === "PenaltyMissed"),
+    )
+    .map((e) => ({
+      side: sideOf(e.teamId),
+      player: nameOf(e.playerId),
+      scored: e.type === "Goal",
+    }));
+  const shootout: ShootoutInfo | undefined = shootoutKicks.length
+    ? {
+        homeScore: shootoutKicks.filter((k) => k.side === "home" && k.scored)
+          .length,
+        awayScore: shootoutKicks.filter((k) => k.side === "away" && k.scored)
+          .length,
+        kicks: shootoutKicks,
+      }
+    : undefined;
+
   return {
     homeOutcome,
     awayOutcome,
@@ -3373,5 +3433,6 @@ export async function getMatchEventSummary(
     awayResultPoints: POINTS[awayOutcome],
     players,
     timeline,
+    shootout,
   };
 }
