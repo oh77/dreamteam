@@ -259,8 +259,13 @@ function ShootoutDots({
   );
 }
 
-function ShootoutKickRow({ kick }: { kick: ShootoutKick }) {
-  const isHome = kick.side === "home";
+function ShootoutKickLabel({
+  kick,
+  align,
+}: {
+  kick: ShootoutKick;
+  align: "left" | "right";
+}) {
   const marker = (
     <span
       className={`shrink-0 text-xs leading-none ${kick.scored ? "" : "text-red-400"}`}
@@ -275,9 +280,9 @@ function ShootoutKickRow({ kick }: { kick: ShootoutKick }) {
       {lastName(kick.player)}
     </span>
   );
-  const content = (
+  return (
     <span className="inline-flex items-center gap-1.5">
-      {isHome ? (
+      {align === "right" ? (
         <>
           {label}
           {marker}
@@ -290,14 +295,29 @@ function ShootoutKickRow({ kick }: { kick: ShootoutKick }) {
       )}
     </span>
   );
+}
+
+// One shoot-out round: home kick on the left, away kick on the right, with the
+// round number between them. Either side may be empty in a decided round.
+function ShootoutRoundRow({
+  round,
+  home,
+  away,
+}: {
+  round: number;
+  home?: ShootoutKick;
+  away?: ShootoutKick;
+}) {
   return (
     <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2 py-1">
       <div className="flex items-center justify-end gap-1.5">
-        {isHome && content}
+        {home && <ShootoutKickLabel kick={home} align="right" />}
       </div>
-      <div className="min-w-[2.5rem]" />
+      <span className="min-w-[2.5rem] text-center text-[10px] font-bold tabular-nums text-white/25">
+        {round}
+      </span>
       <div className="flex items-center justify-start gap-1.5">
-        {!isHome && content}
+        {away && <ShootoutKickLabel kick={away} align="left" />}
       </div>
     </div>
   );
@@ -308,6 +328,10 @@ function ShootoutKickRow({ kick }: { kick: ShootoutKick }) {
 function ShootoutSection({ shootout }: { shootout: ShootoutInfo }) {
   const homeKicks = shootout.kicks.filter((k) => k.side === "home");
   const awayKicks = shootout.kicks.filter((k) => k.side === "away");
+  const rounds = Array.from(
+    { length: Math.max(homeKicks.length, awayKicks.length) },
+    (_, i) => ({ home: homeKicks[i], away: awayKicks[i] }),
+  );
   return (
     <div className="mt-1 border-t border-white/10 pt-2">
       <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2 pb-1">
@@ -323,8 +347,13 @@ function ShootoutSection({ shootout }: { shootout: ShootoutInfo }) {
         <ShootoutDots kicks={awayKicks} align="left" />
       </div>
       <div className="divide-y divide-white/5">
-        {shootout.kicks.map((k, i) => (
-          <ShootoutKickRow key={`${k.side}-${k.player}-${i}`} kick={k} />
+        {rounds.map((r, i) => (
+          <ShootoutRoundRow
+            key={i}
+            round={i + 1}
+            home={r.home}
+            away={r.away}
+          />
         ))}
       </div>
     </div>
